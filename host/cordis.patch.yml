@@ -1,0 +1,8 @@
+# dsh-mobile-bridge bundle patch: one host row over the Desktop or Web profile.
+- insert:
+    - id: mobile-bridge
+      name: dsh-mobile-bridge
+      config:
+        port: 48123
+        discoveryPort: 48124
+        phoneFirst: true

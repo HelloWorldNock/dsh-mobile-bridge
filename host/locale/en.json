@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Mobile Remote",
+    "description": "Control this DeepSeek Harness window from an Android phone on the same Wi-Fi. A 6-digit pairing code opens a token-gated bridge, then the phone can list sessions, send prompts, approve tools, review plans and receive notifications. All traffic stays on the LAN."
+  }
+}

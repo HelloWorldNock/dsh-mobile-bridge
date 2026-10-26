@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">DSH Remote</string>
+    <string name="channel_connection">局域网连接</string>
+    <string name="channel_connection_desc">保持与电脑上的 DSH 桥接连接</string>
+    <string name="channel_alerts">任务与审批</string>
+    <string name="channel_alerts_desc">任务完成、审批请求和待回答问题</string>
+    <string name="reject">拒绝</string>
+    <string name="allow_once">允许一次</string>
+</resources>

@@ -1,0 +1,23 @@
+# 本地工具链（JDK / Android SDK / Gradle，约 2.7 GB）
+.toolchain/
+
+# 构建与打包产物：APK 与插件 tgz 走 GitHub Release，不进仓库
+dist/
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/app/.cxx/
+android/local.properties
+
+# 测试残留与依赖
+testhome/
+test/
+node_modules/
+*.log
+*.err.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini

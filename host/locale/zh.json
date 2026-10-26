@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "手机远控",
+    "description": "在同一局域网内用 Android 手机操作这个 DeepSeek Harness 窗口：6 位配对码建立长连接后，浏览任务、发送 prompt、审批工具调用、审阅计划并接收通知。全部流量留在本地，不经过公网。"
+  }
+}
