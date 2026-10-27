@@ -9,7 +9,7 @@ import { createDiscovery } from './discovery.js'
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.1.0'
+const VERSION = '0.3.1'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,

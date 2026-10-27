@@ -30,11 +30,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.ts7.dshremote.data.AppState
 import com.ts7.dshremote.data.BridgeRepository
+import com.ts7.dshremote.data.ConnectionState
 import com.ts7.dshremote.ui.ApprovalCard
 import com.ts7.dshremote.ui.EmptyState
 import com.ts7.dshremote.ui.QuestionCard
 import com.ts7.dshremote.ui.SectionLabel
+import com.ts7.dshremote.ui.StatusDot
 import com.ts7.dshremote.ui.theme.Amber
+import com.ts7.dshremote.ui.theme.Danger
 import com.ts7.dshremote.ui.theme.Ink
 import com.ts7.dshremote.ui.theme.TextMuted
 import com.ts7.dshremote.ui.theme.TextPrimary
@@ -48,6 +51,7 @@ fun ApprovalsScreen(
 ) {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
+    val groups = state.pendingHosts
 
     Surface(color = Ink, modifier = Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -62,12 +66,17 @@ fun ApprovalsScreen(
                 }
                 Column(Modifier.weight(1f)) {
                     Text("待处理", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
-                    Text("${state.pendingCount} 项 · 超时会自动回退到桌面", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                    Text(
+                        if (groups.size > 1) "${state.totalPendingCount} 项 · 来自 ${groups.size} 台主机"
+                        else "${state.totalPendingCount} 项 · 超时会自动回退到桌面",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextMuted
+                    )
                 }
                 Icon(Icons.Outlined.VerifiedUser, contentDescription = null, tint = Amber)
             }
 
-            if (state.pendingCount == 0) {
+            if (groups.isEmpty()) {
                 EmptyState("没有待处理事项", "审批和提问会实时出现在这里")
             } else {
                 LazyColumn(
@@ -75,47 +84,78 @@ fun ApprovalsScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    if (state.pending.approvals.isNotEmpty()) {
-                        item { SectionLabel("权限审批", "${state.pending.approvals.size}") }
-                        items(state.pending.approvals, key = { it.id }) { approval ->
-                            Column {
-                                if (!approval.sessionTitle.isNullOrBlank()) {
-                                    Text(
-                                        approval.sessionTitle,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = TextMuted,
-                                        modifier = Modifier.padding(bottom = 4.dp)
-                                    )
-                                }
-                                ApprovalCard(approval, onResolve = { action ->
-                                    scope.launch {
-                                        busy = true
-                                        repository.approve(approval.id, action)
-                                        busy = false
-                                    }
-                                }, busy = busy)
+                    groups.forEach { group ->
+                        item(key = "host-${group.id}") {
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp, bottom = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                StatusDot(
+                                    if (group.connection == ConnectionState.Connected) Amber else Danger,
+                                    7
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    group.label,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = TextPrimary
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "${group.pendingCount} 项",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextMuted
+                                )
                             }
                         }
-                    }
-                    if (state.pending.questions.isNotEmpty()) {
-                        item { SectionLabel("提问与计划审阅", "${state.pending.questions.size}") }
-                        items(state.pending.questions, key = { it.id }) { question ->
-                            Column {
-                                if (!question.sessionTitle.isNullOrBlank()) {
-                                    Text(
-                                        question.sessionTitle,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = TextMuted,
-                                        modifier = Modifier.padding(bottom = 4.dp)
-                                    )
-                                }
-                                QuestionCard(question, onSubmit = { answers ->
-                                    scope.launch {
-                                        busy = true
-                                        repository.answer(question.id, answers)
-                                        busy = false
+                        if (group.pending.approvals.isNotEmpty()) {
+                            item(key = "approvals-${group.id}") {
+                                SectionLabel("权限审批", "${group.pending.approvals.size}")
+                            }
+                            items(group.pending.approvals, key = { "a-${group.id}-${it.id}" }) { approval ->
+                                Column {
+                                    if (!approval.sessionTitle.isNullOrBlank()) {
+                                        Text(
+                                            approval.sessionTitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TextMuted,
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        )
                                     }
-                                }, busy = busy)
+                                    ApprovalCard(approval, onResolve = { action ->
+                                        scope.launch {
+                                            busy = true
+                                            repository.approve(approval.id, action, group.id)
+                                            busy = false
+                                        }
+                                    }, busy = busy)
+                                }
+                            }
+                        }
+                        if (group.pending.questions.isNotEmpty()) {
+                            item(key = "questions-${group.id}") {
+                                SectionLabel("提问与计划审阅", "${group.pending.questions.size}")
+                            }
+                            items(group.pending.questions, key = { "q-${group.id}-${it.id}" }) { question ->
+                                Column {
+                                    if (!question.sessionTitle.isNullOrBlank()) {
+                                        Text(
+                                            question.sessionTitle,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TextMuted,
+                                            modifier = Modifier.padding(bottom = 4.dp)
+                                        )
+                                    }
+                                    QuestionCard(question, onSubmit = { answers ->
+                                        scope.launch {
+                                            busy = true
+                                            repository.answer(question.id, answers, group.id)
+                                            busy = false
+                                        }
+                                    }, busy = busy)
+                                }
                             }
                         }
                     }

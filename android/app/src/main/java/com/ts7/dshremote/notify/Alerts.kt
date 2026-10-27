@@ -14,13 +14,13 @@ import com.ts7.dshremote.MainActivity
 import com.ts7.dshremote.R
 import com.ts7.dshremote.data.PendingApproval
 import com.ts7.dshremote.data.PendingQuestion
-import com.ts7.dshremote.ui.theme.Amber
 
 object Alerts {
     const val CHANNEL_CONNECTION = "dsh_connection"
     const val CHANNEL_ALERTS = "dsh_alerts"
     const val FOREGROUND_ID = 1001
     const val EXTRA_ID = "pending_id"
+    const val EXTRA_HOST = "host_id"
     const val ACTION_ALLOW = "com.ts7.dshremote.APPROVE"
     const val ACTION_REJECT = "com.ts7.dshremote.REJECT"
 
@@ -61,31 +61,31 @@ object Alerts {
             .build()
     }
 
-    fun approval(context: Context, approval: PendingApproval) {
+    fun approval(context: Context, hostId: String, hostLabel: String, approval: PendingApproval) {
         val title = approval.sessionTitle?.takeIf { it.isNotBlank() } ?: "DSH 任务"
         val body = approval.preview?.preview?.takeIf { it.isNotBlank() }
-            ?: approval.reason?.takeIf { it.isNotBlank() }
             ?: approval.displayReason?.takeIf { it.isNotBlank() }
+            ?: approval.reason?.takeIf { it.isNotBlank() }
             ?: "请求执行 ${approval.toolName}"
-        val allow = action(context, approval.id, ACTION_ALLOW, 1)
-        val reject = action(context, approval.id, ACTION_REJECT, 2)
+        val allow = action(context, hostId, approval.id, ACTION_ALLOW, 1)
+        val reject = action(context, hostId, approval.id, ACTION_REJECT, 2)
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("审批：${approval.toolName}")
+            .setContentTitle("审批 · ${hostLabel} · ${approval.toolName}")
             .setContentText(body)
             .setSubText(title)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(openIntent(context, approval.sessionId, approval.id, 3))
+            .setContentIntent(openIntent(context, hostId, approval.sessionId, approval.id, 3))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .addAction(0, context.getString(R.string.reject), reject)
             .addAction(0, context.getString(R.string.allow_once), allow)
             .build()
-        notify(context, approvalNotificationId(approval.id), notification)
+        notify(context, approvalNotificationId(hostId, approval.id), notification)
     }
 
-    fun question(context: Context, question: PendingQuestion) {
+    fun question(context: Context, hostId: String, hostLabel: String, question: PendingQuestion) {
         val title = question.sessionTitle?.takeIf { it.isNotBlank() } ?: "DSH 任务"
         val body = if (question.planReview) {
             "计划待审阅，点按查看并批准"
@@ -94,68 +94,96 @@ object Alerts {
         }
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(if (question.planReview) "计划待审阅" else "需要你的选择")
+            .setContentTitle(
+                "${if (question.planReview) "计划待审阅" else "需要你的选择"} · $hostLabel"
+            )
             .setContentText(body)
             .setSubText(title)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(openIntent(context, question.sessionId, question.id, 4))
+            .setContentIntent(openIntent(context, hostId, question.sessionId, question.id, 4))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .build()
-        notify(context, questionNotificationId(question.id), notification)
+        notify(context, questionNotificationId(hostId, question.id), notification)
     }
 
-    fun turnEnd(context: Context, sessionId: String, title: String, text: String) {
+    fun turnEnd(
+        context: Context,
+        hostId: String,
+        hostLabel: String,
+        sessionId: String,
+        title: String,
+        text: String
+    ) {
         val body = text.replace(Regex("\\s+"), " ").trim().take(160).ifBlank { "任务已完成" }
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("任务完成 · ${title.ifBlank { "DSH" }}")
+            .setContentTitle("任务完成 · ${title.ifBlank { hostLabel }}")
             .setContentText(body)
+            .setSubText(hostLabel)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setContentIntent(openIntent(context, sessionId, null, 5))
+            .setContentIntent(openIntent(context, hostId, sessionId, null, 5))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .build()
-        notify(context, ("turn:" + sessionId).hashCode() and 0x7fffffff, notification)
+        notify(context, ("turn:" + hostId + ":" + sessionId).hashCode() and 0x7fffffff, notification)
     }
 
-    fun connectionLost(context: Context) {
+    fun connectionLost(context: Context, hostLabel: String) {
         val notification = NotificationCompat.Builder(context, CHANNEL_CONNECTION)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("与电脑的连接已断开")
+            .setContentTitle("$hostLabel 的连接已断开")
             .setContentText("点按返回应用重试")
-            .setContentIntent(openIntent(context, null, null, 6))
+            .setContentIntent(openIntent(context, null, null, null, 6))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setAutoCancel(true)
             .build()
-        notify(context, 20, notification)
+        notify(context, ("offline:" + hostLabel).hashCode() and 0x7fffffff, notification)
     }
 
-    fun cancelApproval(context: Context, id: String) = cancel(context, approvalNotificationId(id))
-    fun cancelQuestion(context: Context, id: String) = cancel(context, questionNotificationId(id))
+    fun cancelConnectionLost(context: Context, hostLabel: String) =
+        cancel(context, ("offline:" + hostLabel).hashCode() and 0x7fffffff)
 
-    fun approvalNotificationId(id: String): Int = ("approval:" + id).hashCode() and 0x7fffffff
-    fun questionNotificationId(id: String): Int = ("question:" + id).hashCode() and 0x7fffffff
+    fun cancelApproval(context: Context, hostId: String, id: String) =
+        cancel(context, approvalNotificationId(hostId, id))
 
-    private fun action(context: Context, id: String, action: String, slot: Int): PendingIntent {
+    fun cancelQuestion(context: Context, hostId: String, id: String) =
+        cancel(context, questionNotificationId(hostId, id))
+
+    fun approvalNotificationId(hostId: String, id: String): Int =
+        ("approval:" + hostId + ":" + id).hashCode() and 0x7fffffff
+
+    fun questionNotificationId(hostId: String, id: String): Int =
+        ("question:" + hostId + ":" + id).hashCode() and 0x7fffffff
+
+    private fun action(context: Context, hostId: String, id: String, action: String, slot: Int): PendingIntent {
         val intent = Intent(context, ApprovalActionReceiver::class.java).apply {
             this.action = action
             putExtra(EXTRA_ID, id)
+            putExtra(EXTRA_HOST, hostId)
         }
-        val code = (("$id:$slot").hashCode() and 0x7fffffff)
+        val code = (("$hostId:$id:$slot").hashCode() and 0x7fffffff)
         return PendingIntent.getBroadcast(
             context, code, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
 
-    private fun openIntent(context: Context, sessionId: String?, id: String?, slot: Int): PendingIntent {
+    private fun openIntent(
+        context: Context,
+        hostId: String?,
+        sessionId: String?,
+        id: String?,
+        slot: Int
+    ): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (hostId != null) putExtra(EXTRA_HOST, hostId)
             if (sessionId != null) putExtra("session_id", sessionId)
             if (id != null) putExtra("pending_id", id)
         }
-        val code = (("open:" + (sessionId ?: "") + ":" + (id ?: "") + ":" + slot).hashCode() and 0x7fffffff)
+        val code = (("open:" + (hostId ?: "") + ":" + (sessionId ?: "") + ":" + (id ?: "") + ":" + slot)
+            .hashCode() and 0x7fffffff)
         return PendingIntent.getActivity(
             context, code, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

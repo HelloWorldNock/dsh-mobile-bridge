@@ -3,6 +3,11 @@
 
 # 构建与打包产物：APK 与插件 tgz 走 GitHub Release，不进仓库
 dist/
+host/*.tgz
+
+# 本机发现中继配置（含内网地址，提交时用 example 复制）
+tools/discovery-relay.json
+
 android/.gradle/
 android/.kotlin/
 android/build/

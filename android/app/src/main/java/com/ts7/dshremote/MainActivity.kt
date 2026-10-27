@@ -60,7 +60,9 @@ class MainActivity : ComponentActivity() {
         } else {
             null
         }
-        DeepLinks.open(extra ?: fromUri)
+        val hostId = intent.getStringExtra("host_id")
+            ?: intent.data?.getQueryParameter("host")
+        DeepLinks.open(hostId, extra ?: fromUri)
     }
 
     private fun requestNotificationPermission() {

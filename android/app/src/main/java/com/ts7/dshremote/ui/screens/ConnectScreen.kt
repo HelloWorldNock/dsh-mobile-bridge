@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Button
@@ -45,8 +46,12 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.ts7.dshremote.data.BridgeRepository
+import com.ts7.dshremote.data.ConnectionState
 import com.ts7.dshremote.data.DiscoveredHost
 import com.ts7.dshremote.data.Discovery
+import com.ts7.dshremote.data.HostStore
+import com.ts7.dshremote.data.HostSummary
+import com.ts7.dshremote.data.normalizeBaseUrl
 import com.ts7.dshremote.ui.ConnectionPill
 import com.ts7.dshremote.ui.SectionLabel
 import com.ts7.dshremote.ui.StatusDot
@@ -61,49 +66,114 @@ import com.ts7.dshremote.ui.theme.TextPrimary
 import kotlinx.coroutines.launch
 
 @Composable
-fun ConnectScreen(repository: BridgeRepository, connection: com.ts7.dshremote.data.ConnectionState) {
+fun ConnectScreen(
+    repository: BridgeRepository,
+    hosts: List<HostSummary>,
+    onConnected: () -> Unit,
+    onBack: () -> Unit
+) {
     val scope = rememberCoroutineScope()
-    var baseUrl by remember { mutableStateOf(repository.savedBaseUrl) }
+    var baseUrl by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var scanning by remember { mutableStateOf(false) }
     var pairing by remember { mutableStateOf(false) }
-    var hosts by remember { mutableStateOf<List<DiscoveredHost>>(emptyList()) }
+    var discovered by remember { mutableStateOf<List<DiscoveredHost>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun scan() {
         scanning = true
         error = null
-        hosts = runCatching { Discovery.scan() }.getOrDefault(emptyList())
+        discovered = runCatching { Discovery.scan() }.getOrDefault(emptyList())
         scanning = false
     }
 
     LaunchedEffect(Unit) { scan() }
+
+    fun matchingHost(host: DiscoveredHost): HostSummary? {
+        val base = normalizeBaseUrl(host.baseUrl)
+        return hosts.firstOrNull { normalizeBaseUrl(it.baseUrl) == base }
+            ?: hosts.firstOrNull {
+                host.deviceId != null &&
+                    it.deviceId == host.deviceId &&
+                    HostStore.portOf(it.baseUrl) == HostStore.portOf(base)
+            }
+    }
+    fun isPaired(host: DiscoveredHost): Boolean = matchingHost(host) != null
 
     Surface(color = Ink, modifier = Modifier.fillMaxSize()) {
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp, vertical = 28.dp)
+                .padding(horizontal = 22.dp, vertical = 20.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "返回", tint = TextMuted)
+                }
                 Text("TS7", style = MaterialTheme.typography.labelSmall, color = Amber, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
                 Text("/ DSH REMOTE", style = MaterialTheme.typography.labelSmall, color = TextMuted)
                 Spacer(Modifier.weight(1f))
-                ConnectionPill(connection)
+                ConnectionPill(
+                    if (hosts.any { it.connected }) ConnectionState.Connected else ConnectionState.Disconnected
+                )
             }
-            Spacer(Modifier.height(22.dp))
-            Text("把桌面上的 DSH\n装进口袋", style = MaterialTheme.typography.displaySmall, color = TextPrimary)
+            Spacer(Modifier.height(18.dp))
+            Text("多台电脑，\n一个口袋", style = MaterialTheme.typography.displaySmall, color = TextPrimary)
             Spacer(Modifier.height(10.dp))
             Text(
-                "与电脑处于同一局域网，配对后即可查看任务、批准权限、回答提问和接收完成通知。",
+                "在同一局域网内配对安装了 DSH 插件的电脑。手机可同时连接多台，并在离开局域网后自动改走 Tailscale（需要手机和电脑登录同一个 tailnet）。",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMuted
             )
 
+            if (hosts.isNotEmpty()) {
+                SectionLabel("已配对", "${hosts.size} 台")
+                hosts.forEach { host ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clipCard()
+                            .clickable {
+                                repository.selectHost(host.id)
+                                onConnected()
+                            }
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusDot(connectionColor(host.connection), 8)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    host.label,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = TextPrimary
+                                )
+                                if (host.active) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("当前", style = MaterialTheme.typography.labelSmall, color = Amber)
+                                }
+                            }
+                            Text(
+                                "${host.baseUrl} · ${connectionLabel(host.connection)}",
+                                style = MonoText,
+                                color = TextMuted
+                            )
+                        }
+                        Text(
+                            if (host.active) "进入" else "使用",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Amber
+                        )
+                    }
+                }
+            }
+
             SectionLabel("发现附近主机", if (scanning) "扫描中" else "同一 Wi-Fi")
-            if (hosts.isEmpty()) {
+            if (discovered.isEmpty()) {
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -124,28 +194,52 @@ fun ConnectScreen(repository: BridgeRepository, connection: com.ts7.dshremote.da
                     }
                 }
             } else {
-                hosts.forEach { host ->
+                discovered.forEach { host ->
+                    val paired = isPaired(host)
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp)
                             .clipCard()
-                            .clickable { baseUrl = host.baseUrl }
+                            .clickable {
+                                if (paired) {
+                                    matchingHost(host)?.let { existing ->
+                                        repository.selectHost(existing.id)
+                                        onConnected()
+                                    }
+                                } else {
+                                    baseUrl = host.baseUrl
+                                }
+                            }
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        StatusDot(Amber, 8)
+                        StatusDot(if (paired) TextMuted else Amber, 8)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text(host.label, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(host.label, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                                if (paired) {
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("已配对", style = MaterialTheme.typography.labelSmall, color = TextMuted)
+                                }
+                                host.routeLabel?.let { route ->
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(route, style = MaterialTheme.typography.labelSmall, color = Amber)
+                                }
+                            }
                             Text(host.baseUrl, style = MonoText, color = TextMuted)
                         }
-                        Text("选择", style = MaterialTheme.typography.labelLarge, color = Amber)
+                        Text(
+                            if (paired) "使用" else "选择",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (paired) TextMuted else Amber
+                        )
                     }
                 }
             }
 
-            SectionLabel("手动连接")
+            SectionLabel("添加新主机")
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
@@ -155,6 +249,12 @@ fun ConnectScreen(repository: BridgeRepository, connection: com.ts7.dshremote.da
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MonoText,
                 colors = fieldColors()
+            )
+            Text(
+                "外网配对时填电脑的 Tailscale 地址，例如 100.x.x.x:48123。",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextMuted,
+                modifier = Modifier.padding(top = 6.dp, start = 2.dp)
             )
             Spacer(Modifier.height(10.dp))
             OutlinedTextField(
@@ -184,7 +284,18 @@ fun ConnectScreen(repository: BridgeRepository, connection: com.ts7.dshremote.da
                     scope.launch {
                         pairing = true
                         error = null
-                        repository.pair(baseUrl, code).onFailure { failure ->
+                        val known = discovered.firstOrNull {
+                            normalizeBaseUrl(it.baseUrl) == normalizeBaseUrl(baseUrl)
+                        }
+                        repository.pair(
+                            baseUrl = baseUrl,
+                            code = code,
+                            knownHostName = known?.hostName,
+                            knownDeviceId = known?.deviceId
+                        ).onSuccess {
+                            code = ""
+                            onConnected()
+                        }.onFailure { failure ->
                             error = failure.message ?: "配对失败"
                         }
                         pairing = false
@@ -211,11 +322,25 @@ fun ConnectScreen(repository: BridgeRepository, connection: com.ts7.dshremote.da
                     Spacer(Modifier.height(8.dp))
                     Step("1", "在电脑端 DSH 打开手机远控设置页")
                     Step("2", "输入设置页显示的 6 位配对码")
-                    Step("3", "保持同一 Wi-Fi，点按连接")
+                    Step("3", "对每台电脑重复一次，即可同时连接")
                 }
             }
         }
     }
+}
+
+private fun connectionColor(state: ConnectionState) = when (state) {
+    ConnectionState.Connected -> Amber
+    ConnectionState.Connecting -> Amber
+    ConnectionState.Error -> Danger
+    ConnectionState.Disconnected -> TextMuted
+}
+
+private fun connectionLabel(state: ConnectionState) = when (state) {
+    ConnectionState.Connected -> "在线"
+    ConnectionState.Connecting -> "连接中"
+    ConnectionState.Error -> "连接失败"
+    ConnectionState.Disconnected -> "离线"
 }
 
 @Composable

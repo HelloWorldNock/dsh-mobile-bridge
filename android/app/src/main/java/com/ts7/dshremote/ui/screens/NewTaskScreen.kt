@@ -68,6 +68,15 @@ fun NewTaskScreen(
     var workspaceId by remember { mutableStateOf(state.workspaces.firstOrNull()?.id) }
     var creating by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var images by remember { mutableStateOf<List<com.ts7.dshremote.data.PromptImage>>(emptyList()) }
+    var imageError by remember { mutableStateOf<String?>(null) }
+    val pickImages = com.ts7.dshremote.ui.rememberImagePicker(
+        onImages = { picked ->
+            images = (images + picked).take(com.ts7.dshremote.data.ImagePayload.MAX_IMAGES)
+            imageError = null
+        },
+        onError = { imageError = it }
+    )
 
     LaunchedEffect(Unit) { repository.refreshCatalog() }
 
@@ -151,6 +160,32 @@ fun NewTaskScreen(
                 )
             )
 
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                com.ts7.dshremote.ui.AttachImageButton(
+                    onClick = {
+                        imageError = null
+                        pickImages()
+                    },
+                    enabled = images.size < com.ts7.dshremote.data.ImagePayload.MAX_IMAGES && !creating
+                )
+                Spacer(Modifier.width(8.dp))
+                com.ts7.dshremote.ui.ImageCountBadge(images.size)
+                Spacer(Modifier.weight(1f))
+                imageError?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = Danger)
+                }
+            }
+            if (images.isNotEmpty()) {
+                com.ts7.dshremote.ui.AttachmentChips(
+                    images = images,
+                    onRemove = { index -> images = images.filterIndexed { i, _ -> i != index } },
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+
             SectionLabel("执行方式")
             Row(
                 Modifier
@@ -213,14 +248,14 @@ fun NewTaskScreen(
                         error = "请选择工作区"
                         return@Button
                     }
-                    if (prompt.isBlank()) {
-                        error = "请输入任务内容"
+                    if (prompt.isBlank() && images.isEmpty()) {
+                        error = "请输入任务内容或添加图片"
                         return@Button
                     }
                     scope.launch {
                         creating = true
                         error = null
-                        repository.createSession(target, null, prompt, plan, permission)
+                        repository.createSession(target, null, prompt, plan, permission, images)
                             .onSuccess { id -> onCreated(id) }
                             .onFailure { failure -> error = failure.message ?: "创建失败" }
                         creating = false

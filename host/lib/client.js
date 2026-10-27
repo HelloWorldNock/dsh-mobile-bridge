@@ -50,7 +50,7 @@ body[data-ds-dark-theme] .dmb-label{color:#8B97AB}
 .dmb-value{font-weight:600;font-size:14px;word-break:break-all}
 .dmb-mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 .dmb-ips{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.dmb-chip{font-size:12px;padding:4px 9px;border-radius:8px;background:rgba(77,107,254,.09);color:#4D6BFE}
+.dmb-chip{font-size:12px;padding:4px 9px;border-radius:8px;background:rgba(77,107,254,.09);color:#4D6BFE;border:0;cursor:pointer;font-family:inherit}
 .dmb-pair{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}
 .dmb-code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:34px;font-weight:700;letter-spacing:.12em;color:#4D6BFE;line-height:1.1}
 .dmb-count{font-size:12px;color:#667085;margin-top:6px}
@@ -245,6 +245,16 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
         }
       }, [snap])
 
+      const copyEndpoint = useCallback(async (endpoint) => {
+        if (!navigator.clipboard) return
+        try {
+          await navigator.clipboard.writeText(`${endpoint.address}:${snap?.port ?? ""}`)
+          setSaved(endpoint.kind === "tailscale" ? "Tailscale 地址已复制" : "局域网地址已复制")
+        } catch (_) {
+          setSaved("复制失败")
+        }
+      }, [snap])
+
       const left = snap && snap.codeExpiresAt
         ? Math.max(0, Math.floor((new Date(snap.codeExpiresAt).getTime() - now) / 1000))
         : 0
@@ -293,8 +303,24 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                 h(
                   "div",
                   { className: "dmb-ips" },
-                  (snap.addresses || []).map((item) => h("span", { key: item.address, className: "dmb-chip dmb-mono" }, item.address)),
+                  (snap.endpoints || []).map((endpoint) =>
+                    h(
+                      "button",
+                      {
+                        key: endpoint.url,
+                        className: "dmb-chip dmb-mono",
+                        title: "点击复制地址",
+                        onClick: () => copyEndpoint(endpoint),
+                      },
+                      `${endpoint.kind === "tailscale" ? "Tailscale" : "局域网"} ${endpoint.address}:${snap.port}`,
+                    ),
+                  ),
                   h("button", { className: "dmb-btn", onClick: copyDeviceId, disabled: busy !== "" }, "复制设备 ID"),
+                ),
+                h(
+                  "div",
+                  { className: "dmb-sub", style: { marginTop: 8, lineHeight: 1.6 } },
+                  "手机在局域网内会自动走局域网地址；离开局域网后，如果手机和电脑登录同一个 Tailscale，会自动切换到 Tailscale 地址。",
                 ),
               )
             : null,

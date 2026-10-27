@@ -4,9 +4,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 /** A tiny bridge between notification taps and the Compose navigation graph. */
 object DeepLinks {
-    val session = MutableStateFlow<String?>(null)
+    data class Target(val hostId: String?, val sessionId: String)
 
-    fun open(sessionId: String?) {
-        if (!sessionId.isNullOrBlank()) session.value = sessionId
+    val session = MutableStateFlow<Target?>(null)
+
+    fun open(hostId: String?, sessionId: String?) {
+        if (!sessionId.isNullOrBlank()) session.value = Target(hostId, sessionId)
     }
 }

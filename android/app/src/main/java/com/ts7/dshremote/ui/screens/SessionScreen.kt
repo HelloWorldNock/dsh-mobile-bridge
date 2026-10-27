@@ -92,9 +92,20 @@ fun SessionScreen(
     var dialog by remember { mutableStateOf<SessionDialog?>(null) }
     var input by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("queue") }
+    var images by remember { mutableStateOf<List<com.ts7.dshremote.data.PromptImage>>(emptyList()) }
+    var imageError by remember { mutableStateOf<String?>(null) }
     var renameText by remember(session?.id) { mutableStateOf(session?.title.orEmpty()) }
     var planActive by remember(session?.id) { mutableStateOf(session?.plan?.active == true) }
     var acting by remember { mutableStateOf(false) }
+    val pickImages = com.ts7.dshremote.ui.rememberImagePicker(
+        onImages = { picked ->
+            images = (images + picked).take(com.ts7.dshremote.data.ImagePayload.MAX_IMAGES)
+            imageError = null
+        },
+        onError = { imageError = it }
+    )
+
+    LaunchedEffect(session?.id) { images = emptyList() }
 
     val approval = state.pending.approvals.firstOrNull { it.sessionId == null || it.sessionId == state.activeSessionId }
     val question = state.pending.questions.firstOrNull { it.sessionId == null || it.sessionId == state.activeSessionId }
@@ -226,6 +237,18 @@ fun SessionScreen(
                 }
             }
 
+            if (images.isNotEmpty() || imageError != null) {
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    com.ts7.dshremote.ui.AttachmentChips(
+                        images = images,
+                        onRemove = { index -> images = images.filterIndexed { i, _ -> i != index } }
+                    )
+                    imageError?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = Danger)
+                    }
+                }
+            }
+
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -233,6 +256,14 @@ fun SessionScreen(
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.Bottom
             ) {
+                com.ts7.dshremote.ui.AttachImageButton(
+                    onClick = {
+                        imageError = null
+                        pickImages()
+                    },
+                    enabled = images.size < com.ts7.dshremote.data.ImagePayload.MAX_IMAGES && !acting
+                )
+                Spacer(Modifier.width(6.dp))
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
@@ -242,11 +273,17 @@ fun SessionScreen(
                     textStyle = MaterialTheme.typography.bodyLarge,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = {
-                        val text = input
-                        if (text.isNotBlank()) {
+                        val text = input.trim()
+                        if (text.isNotBlank() || images.isNotEmpty()) {
                             scope.launch {
-                                repository.sendPrompt(text, mode)
-                                input = ""
+                                val sent = repository.sendPrompt(text, mode, images)
+                                if (sent.isSuccess) {
+                                    input = ""
+                                    images = emptyList()
+                                    imageError = null
+                                } else {
+                                    imageError = sent.exceptionOrNull()?.message ?: "发送失败"
+                                }
                             }
                         }
                     }),
@@ -280,23 +317,29 @@ fun SessionScreen(
                 }
                 IconButton(
                     onClick = {
-                        val text = input
-                        if (text.isNotBlank()) {
+                        val text = input.trim()
+                        if (text.isNotBlank() || images.isNotEmpty()) {
                             scope.launch {
-                                repository.sendPrompt(text, mode)
-                                input = ""
+                                val sent = repository.sendPrompt(text, mode, images)
+                                if (sent.isSuccess) {
+                                    input = ""
+                                    images = emptyList()
+                                    imageError = null
+                                } else {
+                                    imageError = sent.exceptionOrNull()?.message ?: "发送失败"
+                                }
                             }
                         }
                     },
-                    enabled = input.isNotBlank(),
+                    enabled = input.isNotBlank() || images.isNotEmpty(),
                     modifier = Modifier
                         .size(48.dp)
-                        .background(if (input.isNotBlank()) Amber else Outline, RoundedCornerShape(14.dp))
+                        .background(if (input.isNotBlank() || images.isNotEmpty()) Amber else Outline, RoundedCornerShape(14.dp))
                 ) {
                     Icon(
                         Icons.Outlined.ArrowUpward,
                         contentDescription = "发送",
-                        tint = if (input.isNotBlank()) Color(0xFFFFFFFF) else TextMuted
+                        tint = if (input.isNotBlank() || images.isNotEmpty()) Color(0xFFFFFFFF) else TextMuted
                     )
                 }
             }

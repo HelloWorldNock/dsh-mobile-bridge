@@ -107,7 +107,12 @@ fun SectionLabel(text: String, trailing: String? = null) {
 }
 
 @Composable
-fun SessionCard(session: SessionSummary, onClick: () -> Unit) {
+fun SessionCard(
+    session: SessionSummary,
+    showFolderIcon: Boolean = true,
+    showCwd: Boolean = true,
+    onClick: () -> Unit
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -121,21 +126,23 @@ fun SessionCard(session: SessionSummary, onClick: () -> Unit) {
             Modifier.padding(16.dp),
             verticalAlignment = Alignment.Top
         ) {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFE9EEF8)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Outlined.Folder,
-                    contentDescription = null,
-                    tint = if (session.running) Amber else TextMuted,
-                    modifier = Modifier.size(23.dp)
-                )
+            if (showFolderIcon) {
+                Box(
+                    Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFFE9EEF8)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Outlined.Folder,
+                        contentDescription = null,
+                        tint = if (session.running) Amber else TextMuted,
+                        modifier = Modifier.size(23.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
             }
-            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -151,14 +158,16 @@ fun SessionCard(session: SessionSummary, onClick: () -> Unit) {
                         StatusDot(Success, 7)
                     }
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    baseName(session.cwd),
-                    style = MonoText,
-                    color = TextMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                if (showCwd) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        baseName(session.cwd),
+                        style = MonoText,
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (session.plan.active) Chip("PLAN", Amber)

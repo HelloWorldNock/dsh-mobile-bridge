@@ -1,7 +1,7 @@
 {
   "name": "dsh-mobile-bridge",
-  "version": "0.1.0",
-  "description": "LAN bridge that lets an Android phone drive DeepSeek Harness sessions: list tasks, prompt, approve tools, review plans and receive notifications.",
+  "version": "0.3.1",
+  "description": "LAN and Tailscale bridge that lets an Android phone drive DeepSeek Harness sessions: list tasks, prompt, approve tools, review plans and receive notifications.",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
@@ -28,6 +28,7 @@
     "remote-control",
     "android",
     "lan",
+    "tailscale",
     "sse"
   ],
   "dsh": {

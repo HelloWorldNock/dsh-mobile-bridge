@@ -130,7 +130,8 @@ data class Workspace(
     val id: String,
     val path: String = "",
     val title: String? = null,
-    val updatedAt: Long? = null
+    val updatedAt: Long? = null,
+    val sessionIds: List<String> = emptyList()
 )
 
 @Serializable
@@ -152,6 +153,16 @@ data class PresetCatalog(
 )
 
 @Serializable
+data class BridgeEndpoint(
+    val kind: String = "lan",
+    val address: String? = null,
+    val url: String = ""
+) {
+    val isLan: Boolean get() = kind == "lan"
+    val isTailscale: Boolean get() = kind == "tailscale"
+}
+
+@Serializable
 data class BridgeInfo(
     val bridge: BridgeHost? = null,
     val device: PairedDevice? = null,
@@ -165,7 +176,8 @@ data class BridgeHost(
     val hostName: String? = null,
     val port: Int? = null,
     val discoveryPort: Int? = null,
-    val clients: Int = 0
+    val clients: Int = 0,
+    val endpoints: List<BridgeEndpoint> = emptyList()
 )
 
 @Serializable
@@ -194,7 +206,8 @@ data class PairResult(
 data class PairHost(
     val id: String? = null,
     val name: String? = null,
-    val version: String? = null
+    val version: String? = null,
+    val endpoints: List<BridgeEndpoint> = emptyList()
 )
 
 @Serializable

@@ -4,12 +4,17 @@ import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { BridgeError } from './auth.js'
 import { lanAddresses, resolveDshHome } from './state.js'
+import { bridgeEndpoints } from './endpoints.js'
 import { projectRecords, serializeSummary } from './dto.js'
 
-const MAX_BODY_BYTES = 1_048_576
+const MAX_BODY_BYTES = 33_554_432
 const MAX_PROMPT_CHARS = 20_000
 const MAX_TITLE_CHARS = 200
 const MAX_HISTORY = 80
+const MAX_IMAGES = 4
+const MAX_IMAGE_BYTES = 8_388_608
+const MAX_IMAGE_TOTAL_BYTES = 16_777_216
+const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const LOCAL_ORIGIN = /^(?:https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?|dsh-app:\/\/[^/]+)$/
 
 function isLoopback(req) {
@@ -74,6 +79,34 @@ function validTimeZone(value) {
   } catch {
     return undefined
   }
+}
+
+function promptContent(text, images) {
+  const content = []
+  if (text !== '') content.push({ type: 'text', text })
+  if (images === undefined) return content
+  if (!Array.isArray(images)) throw new BridgeError('prompt/image-invalid', '图片格式不正确', 400)
+  if (images.length > MAX_IMAGES) throw new BridgeError('prompt/too-many-images', `最多发送 ${MAX_IMAGES} 张图片`, 400)
+  let total = 0
+  for (const image of images) {
+    if (image === null || typeof image !== 'object') throw new BridgeError('prompt/image-invalid', '图片格式不正确', 400)
+    const mediaType = image.mediaType
+    if (typeof mediaType !== 'string' || !IMAGE_MEDIA_TYPES.has(mediaType)) {
+      throw new BridgeError('prompt/image-invalid', '只支持 PNG、JPEG、WebP 或 GIF 图片', 400)
+    }
+    const data = image.data
+    if (typeof data !== 'string' || data.length === 0 || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) {
+      throw new BridgeError('prompt/image-invalid', '图片数据不是合法的 base64', 400)
+    }
+    const bytes = Buffer.byteLength(data, 'base64')
+    if (bytes > MAX_IMAGE_BYTES) throw new BridgeError('prompt/image-too-large', '单张图片过大', 413)
+    total += bytes
+    if (total > MAX_IMAGE_TOTAL_BYTES) throw new BridgeError('prompt/image-too-large', '图片总大小过大', 413)
+    const part = { type: 'image', mediaType, data }
+    if (typeof image.name === 'string' && image.name.trim() !== '') part.name = image.name.trim().slice(0, 120)
+    content.push(part)
+  }
+  return content
 }
 
 function cleanTitle(value) {
@@ -182,6 +215,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       ...auth.setupState(),
       port: config.port,
       addresses: lanAddresses(),
+      endpoints: bridgeEndpoints(config.port),
       clients: broadcast.count(),
       csrf,
       version
@@ -206,6 +240,22 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
 
     if (method === 'GET' && path === '/health') {
       sendJson(res, 200, { ok: true, version, deviceId: state.deviceId })
+      return
+    }
+
+    // Same non-secret payload as the UDP discovery reply, for hosts that sit
+    // behind NAT and cannot receive/forward UDP from the LAN.
+    if (method === 'GET' && path === '/api/discovery') {
+      sendJson(res, 200, {
+        type: 'dsh-remote-bridge',
+        version: 1,
+        bridgeVersion: version,
+        deviceId: state.deviceId,
+        hostName: state.hostName,
+        port: config.port,
+        tls: false,
+        endpoints: bridgeEndpoints(config.port)
+      })
       return
     }
 
@@ -268,7 +318,14 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         appVersion: body.appVersion,
         ip: req.socket.remoteAddress
       })
-      sendJson(res, 200, result)
+      sendJson(res, 200, {
+        ...result,
+        host: {
+          ...result.host,
+          version,
+          endpoints: bridgeEndpoints(config.port)
+        }
+      })
       return
     }
 
@@ -283,6 +340,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
           port: config.port,
           discoveryPort: config.discoveryPort,
           addresses: lanAddresses(),
+          endpoints: bridgeEndpoints(config.port),
           clients: broadcast.count()
         },
         device: { id: device.id, name: device.name },
@@ -297,7 +355,9 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         workspaces: list.map((workspace) => ({
           id: workspace.id,
           path: workspace.path,
-          title: workspace.title
+          title: workspace.title,
+          updatedAt: workspace.updatedAt,
+          sessionIds: workspace.sessionIds ?? []
         }))
       })
       return
@@ -360,7 +420,18 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
             requestId: randomUUID(),
             sessionId: created.sessionId,
             mode: body.mode === 'steer' ? 'steer' : 'queue',
-            content: [{ type: 'text', text }],
+            content: promptContent(text, body.images),
+            clientTimeZone: validTimeZone(body.clientTimeZone)
+          },
+          new AbortController().signal
+        )
+      } else if (Array.isArray(body.images) && body.images.length > 0) {
+        await ctx.sessionController.prompt(
+          {
+            requestId: randomUUID(),
+            sessionId: created.sessionId,
+            mode: body.mode === 'steer' ? 'steer' : 'queue',
+            content: promptContent('', body.images),
             clientTimeZone: validTimeZone(body.clientTimeZone)
           },
           new AbortController().signal
@@ -435,14 +506,15 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       if (method === 'POST' && action === 'prompt') {
         const body = await readJson(req)
         const text = typeof body.text === 'string' ? body.text.trim() : ''
-        if (text === '') throw new BridgeError('prompt/empty', '内容不能为空', 400)
+        const hasImages = Array.isArray(body.images) && body.images.length > 0
+        if (text === '' && !hasImages) throw new BridgeError('prompt/empty', '内容不能为空', 400)
         if (text.length > MAX_PROMPT_CHARS) throw new BridgeError('prompt/too-long', '内容过长', 400)
         await ctx.sessionController.prompt(
           {
             requestId: randomUUID(),
             sessionId,
             mode: body.mode === 'steer' ? 'steer' : 'queue',
-            content: [{ type: 'text', text }],
+            content: promptContent(text, body.images),
             clientTimeZone: validTimeZone(body.clientTimeZone)
           },
           new AbortController().signal

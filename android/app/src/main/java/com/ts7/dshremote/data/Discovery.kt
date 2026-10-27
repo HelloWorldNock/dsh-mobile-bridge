@@ -17,7 +17,8 @@ data class DiscoveryPacket(
     val deviceId: String? = null,
     val hostName: String? = null,
     val port: Int = 48123,
-    val tls: Boolean = false
+    val tls: Boolean = false,
+    val endpoints: List<BridgeEndpoint> = emptyList()
 )
 
 data class DiscoveredHost(
@@ -25,14 +26,25 @@ data class DiscoveredHost(
     val port: Int,
     val deviceId: String?,
     val hostName: String?,
-    val bridgeVersion: String?
+    val bridgeVersion: String?,
+    val endpoints: List<BridgeEndpoint> = emptyList()
 ) {
     val baseUrl: String get() = "http://$address:$port"
     val label: String get() = hostName?.takeIf { it.isNotBlank() } ?: address
+    val hasLan: Boolean get() = endpoints.any { it.isLan }
+    val hasTailscale: Boolean get() = endpoints.any { it.isTailscale }
+    val routeLabel: String?
+        get() = when {
+            hasLan && hasTailscale -> "局域网 + Tailscale"
+            hasTailscale -> "Tailscale"
+            else -> null
+        }
 }
 
 object Discovery {
-    private const val DISCOVERY_PORT = 48124
+    const val DISCOVERY_PORT = 48124
+    const val RELAY_DISCOVERY_PORT = 48126
+    private val discoveryPorts = intArrayOf(DISCOVERY_PORT, RELAY_DISCOVERY_PORT)
 
     suspend fun scan(timeoutMs: Long = 1_600): List<DiscoveredHost> = withContext(Dispatchers.IO) {
         val found = LinkedHashMap<String, DiscoveredHost>()
@@ -41,11 +53,13 @@ object Discovery {
         DatagramSocket().use { socket ->
             socket.broadcast = true
             socket.soTimeout = 200
-            for (target in targets) {
-                try {
-                    socket.send(DatagramPacket(request, request.size, target, DISCOVERY_PORT))
-                } catch (_: Throwable) {
-                    // try the next interface
+            for (port in discoveryPorts) {
+                for (target in targets) {
+                    try {
+                        socket.send(DatagramPacket(request, request.size, target, port))
+                    } catch (_: Throwable) {
+                        // try the next interface
+                    }
                 }
             }
             val deadline = System.currentTimeMillis() + timeoutMs
@@ -71,7 +85,8 @@ object Discovery {
                     port = port,
                     deviceId = parsed.deviceId,
                     hostName = parsed.hostName,
-                    bridgeVersion = parsed.bridgeVersion
+                    bridgeVersion = parsed.bridgeVersion,
+                    endpoints = parsed.endpoints.filter { it.url.isNotBlank() }
                 )
             }
         }

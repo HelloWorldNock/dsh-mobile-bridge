@@ -2,7 +2,7 @@
 
 在同一局域网内，用 Android 手机操作 DeepSeek Harness（DSH）的 host 插件。
 
-插件随 profile 启动，自己在 `0.0.0.0:48123` 上开一个只走局域网的桥接端口（UDP `48124` 做设备发现），手机连上来后可以浏览会话、发 prompt、审批工具调用、审阅计划、收通知。DSH 侧没有独立网页，控制端是侧栏底部的「手机远控」按钮和 设置 → 插件 里的卡片；手机端 App 仓库内 `android/`。
+插件随 profile 启动，自己在 `0.0.0.0:48123` 上开一个只走局域网的桥接端口（UDP `48124` 做设备发现），手机连上来后可以浏览会话、发 prompt（可附最多 4 张图片）、审批工具调用、审阅计划、收通知。DSH 侧没有独立网页，控制端是侧栏底部的「手机远控」按钮和 设置 → 插件 里的卡片；手机端 App 仓库内 `android/`。
 
 ## 安装
 
@@ -10,10 +10,10 @@
 
 **插件市场（推荐，自动完成两步）** —— 在 DSH 的插件市场里搜「手机远控」安装，市场会写 `dsh.profile.bundles` 并重启宿主。
 
-**本地 tarball** —— 先 `npm pack`（或运行仓库里的 `tools/pack-plugin.ps1`）拿到 `dsh-mobile-bridge-0.1.0.tgz`：
+**本地 tarball** —— 先 `npm pack`（或运行仓库里的 `tools/pack-plugin.ps1`）拿到 `dsh-mobile-bridge-0.3.0.tgz`：
 
 ```powershell
-dsh plugin --profile desktop add file:F:\path\to\dsh-mobile-bridge-0.1.0.tgz
+dsh plugin --profile desktop add file:F:\path\to\dsh-mobile-bridge-0.3.0.tgz
 ```
 
 **npm** —— 包发布后：
@@ -44,18 +44,18 @@ dsh plugin --profile desktop add dsh-mobile-bridge
 
 - 配对需要桌面面板里显示的 6 位码，120 秒有效；配对成功后手机持有长期 token，断线自动重连。
 - 所有请求要求 `Authorization: Bearer <token>`，token 和设置存在 `$DSH_HOME/mobile-bridge/state.json`。
-- 只监听局域网，不连公网、不上报；同一 Wi-Fi 内的其他设备拿不到 token 就无法接入。
+- 监听局域网和 tailnet 地址；插件只在本机开 HTTP/SSE，不对外上报数据。拿不到 token 的设备无法接入。
 - 审批与计划审阅都走 DSH 自己的请求通道：手机不在线或超时，请求回落到桌面客户端。
 
 ## 验证
 
 ```powershell
-node --test            # 22 个测试：auth / approvals / dto / server
+node --test            # 26 个测试：auth / approvals / discovery / dto / endpoints / server
 node scripts/check.mjs # 语法与导出检查
 dsh --profile desktop --dump-config | Select-String mobile-bridge
 ```
 
-端口起来后 `curl http://127.0.0.1:48123/api/health` 返回 `{"ok":true,...}`。
+端口起来后 `curl http://127.0.0.1:48123/health` 返回 `{"ok":true,...}`；`/api/discovery` 返回与 UDP 发现相同的非敏感信息，供 NAT 中继使用。
 
 ## 卸载
 
@@ -67,7 +67,7 @@ dsh --profile desktop --dump-config | Select-String mobile-bridge
 powershell -NoProfile -File ..\tools\pack-plugin.ps1   # 产物写到仓库根 dist/
 ```
 
-脚本在 `host/` 下跑一次 `npm pack --json`，并做三件事：图标超过 256 KiB 直接失败、检查 `files` 是否收进 `locale` 和 `icon.png`、核对 tgz 里是否真有 `lib/index.js`、`lib/client.js`、`cordis.patch.yml`、`locale/*.json`、`icon.png`、`LICENSE`。当前产物 `dsh-mobile-bridge-0.1.0.tgz` 约 138 KB / 17 个文件，图标 109 KB。
+脚本在 `host/` 下跑一次 `npm pack --json`，并做三件事：图标超过 256 KiB 直接失败、检查 `files` 是否收进 `locale` 和 `icon.png`、核对 tgz 里是否真有 `lib/index.js`、`lib/client.js`、`cordis.patch.yml`、`locale/*.json`、`icon.png`、`LICENSE`。当前产物 `dsh-mobile-bridge-0.3.0.tgz` 约 140 KB / 18 个文件，图标 109 KB。
 
 插件在市场里的卡片信息来自 `locale/zh.json`、`locale/en.json` 的 `meta.title` / `meta.description`，图标走 `exports["./icon"]` → `icon.png`，两者都在 `files` 里，安装后即可被市场读到。`engines.dsh` 声明为 `>=0.2.1-rc.2 <0.3.0-0`，避免装进不兼容的宿主。
 
@@ -76,7 +76,7 @@ powershell -NoProfile -File ..\tools\pack-plugin.ps1   # 产物写到仓库根 d
 装包闭环已实测（一次性 profile `pkgtest`）：
 
 ```powershell
-dsh plugin --profile pkgtest add file:F:\...\dist\dsh-mobile-bridge-0.1.0.tgz
+dsh plugin --profile pkgtest add file:F:\...\dist\dsh-mobile-bridge-0.3.0.tgz
 dsh --profile pkgtest --dump-config | Select-String mobile-bridge
 # - id: mobile-bridge / name: dsh-mobile-bridge / port: 48123 / discoveryPort: 48124 / phoneFirst: true
 ```

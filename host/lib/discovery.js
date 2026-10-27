@@ -1,4 +1,5 @@
 import dgram from 'node:dgram'
+import { bridgeEndpoints } from './endpoints.js'
 
 const DISCOVER_TYPE = 'dsh-remote-discover'
 const ANNOUNCE_TYPE = 'dsh-remote-bridge'
@@ -37,7 +38,8 @@ export function createDiscovery({ port, bridgePort, deviceId, hostName, version,
         deviceId,
         hostName,
         port: bridgePort,
-        tls: false
+        tls: false,
+        endpoints: bridgeEndpoints(bridgePort)
       })
     )
     socket.send(reply, remote.port, remote.address, (error) => {

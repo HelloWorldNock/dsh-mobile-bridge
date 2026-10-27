@@ -42,15 +42,17 @@ fun normalizeBaseUrl(raw: String): String {
 
 class BridgeClient(
     rawBaseUrl: String,
-    private val token: String = ""
+    private val token: String = "",
+    timeoutMs: Long? = null
 ) {
     val baseUrl: String = normalizeBaseUrl(rawBaseUrl)
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(6, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .connectTimeout(timeoutMs ?: 6_000L, TimeUnit.MILLISECONDS)
+        .readTimeout(timeoutMs ?: 0L, TimeUnit.MILLISECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .apply { if (timeoutMs != null) callTimeout(timeoutMs, TimeUnit.MILLISECONDS) }
         .build()
 
     private val jsonType = "application/json; charset=utf-8".toMediaType()
@@ -74,11 +76,27 @@ class BridgeClient(
         return decode(request("GET", "/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/history?${parts.joinToString("&")}"))
     }
 
-    suspend fun prompt(id: String, text: String, mode: String = "queue") {
+    suspend fun prompt(
+        id: String,
+        text: String,
+        mode: String = "queue",
+        images: List<PromptImage> = emptyList()
+    ) {
+        val body = buildString {
+            append('{')
+            if (text.isNotBlank()) append("\"text\":${json.encodeToString(String.serializer(), text)},")
+            if (images.isNotEmpty()) {
+                append("\"images\":")
+                append(json.encodeToString(kotlinx.serialization.builtins.ListSerializer(PromptImage.serializer()), images))
+                append(',')
+            }
+            append("\"mode\":\"$mode\"")
+            append('}')
+        }
         request(
             "POST",
             "/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/prompt",
-            """{"text":${json.encodeToString(String.serializer(), text)},"mode":"$mode"}"""
+            body
         )
     }
 
@@ -122,13 +140,19 @@ class BridgeClient(
         prompt: String,
         plan: Boolean,
         permission: String?,
-        mode: String = "queue"
+        mode: String = "queue",
+        images: List<PromptImage> = emptyList()
     ): CreateSessionResult {
         val body = buildString {
             append('{')
             if (workspaceId != null) append("\"workspaceId\":${json.encodeToString(String.serializer(), workspaceId)},")
             if (cwd != null) append("\"cwd\":${json.encodeToString(String.serializer(), cwd)},")
             append("\"prompt\":${json.encodeToString(String.serializer(), prompt)},")
+            if (images.isNotEmpty()) {
+                append("\"images\":")
+                append(json.encodeToString(kotlinx.serialization.builtins.ListSerializer(PromptImage.serializer()), images))
+                append(',')
+            }
             append("\"plan\":$plan,")
             if (permission != null) append("\"permission\":${json.encodeToString(String.serializer(), permission)},")
             append("\"mode\":\"$mode\"")

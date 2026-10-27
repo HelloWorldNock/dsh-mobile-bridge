@@ -1,20 +1,25 @@
 # TS7 DSH Remote
 
-在同一个局域网内，用 Android 手机远程操作 DeepSeek Harness（DSH）的 host 插件 + 原生 App。
+在局域网或 Tailscale 网络中，用 Android 手机远程操作 DeepSeek Harness（DSH）的 host 插件 + 原生 App。
 
-参考 SKYBOX 的局域网配对方式：桌面端显示设备 ID、IP 和 6 位配对码；手机扫码/输入后建立长期 token。所有流量留在局域网，不经过公网。
+参考 SKYBOX 的局域网配对方式：桌面端显示设备 ID、IP 和 6 位配对码；手机扫码/输入后建立长期 token。默认所有流量留在局域网；电脑开启 Tailscale 后，手机在局域网外会自动改走 tailnet，回到局域网再自动切回直连。手机可以同时连接多台已安装插件的主机，新建任务时最多附带 4 张图片。远程也可以不装系统 Tailscale，直接启用 App 内的实验性内嵌节点。
 
 ## 功能
 
-- 任务列表：搜索、运行状态、工作区、计划/权限标签；默认隐藏已从工作区移除的旧会话
+- 任务列表：按桌面端工作区分组，点标题折叠/展开；搜索会匹配工作区、标题和目录
+- 多主机：同时配对并保持多台 DSH 的 SSE 连接，顶部主机胶囊一键切换；各主机的任务、审批和通知互不串台
+- 局域网/远程自动切换：电脑开启 Tailscale 时，插件同时广播局域网和 tailnet 地址；手机离开 Wi-Fi 自动改走 Tailscale，回到局域网自动切回直连
+- 内嵌 Tailscale（实验）：App 自带 userspace tsnet 节点，不占用系统 VPN，可与系统 Tailscale 或其他 VPN 共存；设置里一键随 App 启动/停止，只把本 App 的 DSH 流量送进 tailnet
 - 彻底删除：任务详情菜单可直接删除会话日志（不可恢复）
 - 新建任务：选择工作区、输入 prompt、可选计划模式/权限预设
+- 图片：新建任务或继续任务时最多附带 4 张 PNG/JPEG/WebP/GIF，App 先压到长边 1600、单张 ≤ 3.5 MB；是否理解图片取决于当前 DSH 模型
+- 虚拟机自动发现：宿主机跑一个 UDP 中继，把手机的发现包转发给 NAT 虚拟机，手机不用再手填转发地址
 - 任务详情：时间线、工具调用与结果、流式回复、停止/重命名
 - 权限审批：手机优先弹出审批卡；允许一次/拒绝；无人接管时回退桌面
 - 计划审阅：plan-review 卡片展示完整计划，批准后退出计划模式并继续执行
 - 普通提问：单选/多选/自定义回答
-- 通知：审批、提问、任务完成；通知动作可直接允许/拒绝
-- 前台服务：保持 SSE 连接；断线自动重连
+- 前台服务：保持所有主机的 SSE 连接；断线自动重连
+- 通知：审批、提问、任务完成；通知动作可直接允许/拒绝，多主机时标注主机名
 - 亮色 UI：浅色背景、DeepSeek 蓝强调色、自适应 Q 版鲸鱼图标
 
 ## 架构
@@ -24,6 +29,7 @@ Android App (Kotlin + Compose)
         │  HTTP JSON + SSE (Bearer token)
         ▼
 dsh-mobile-bridge (host 插件, 0.0.0.0:48123)
+        │  局域网 + Tailscale 地址自动上报
         │  Host service 直调
         ▼
 ctx.sessionController / ctx.sessions / ctx.workspaceRegistry
@@ -44,11 +50,13 @@ host/                 DSH host 插件（无构建步骤，ESM）
   locale/             市场卡片标题与描述（zh / en）
   icon.png            插件图标（≤ 256 KiB）
 contrib/              分发元数据：awesome-dsh-plugin YAML、dshmarket plugins.json
-tools/                打包脚本 pack-plugin.ps1、图标生成、重启脚本
+tools/                打包脚本 pack-plugin.ps1、图标生成、重启脚本、发现中继
 android/              Android 客户端（Gradle + Compose）
+  gobridge/           内嵌 Tailscale 的 Go 源码（gomobile 生成 AAR）
+  app/libs/           预编译 gobridge.aar（arm64-v8a + x86_64）
 docs/screenshots/     MuMu 联调截图
 dist/                 debug APK 与插件 tgz 产物
-.toolchain/           JDK17 / Android SDK / Gradle（本地工具链）
+.toolchain/           JDK17 / Android SDK / Gradle / Go（本地工具链）
 ```
 
 ## 安装 host 插件（desktop profile）
@@ -66,12 +74,14 @@ dist/                 debug APK 与插件 tgz 产物
 
 `dsh-mobile-bridge` 随 DSH 桌面端自动启动：它是 desktop profile 的 host bundle，DSH 启动时加载并监听端口，不需要手工运行；关闭 DSH 后端口也随之消失。PC 侧控制端是 DSH 内的 client 插件，不再提供网页设置页。
 
-- 桥接监听 `0.0.0.0:48123`，UDP 发现 `48124`
+- 桥接监听 `0.0.0.0:48123`，UDP 发现 `48124`；虚拟机场景由宿主机中继在 `48126/udp` 代答
 - 打开方式：DSH 侧栏底部「手机远控」按钮，或 设置 → 插件 → 手机远控 卡片
 - 面板显示设备 ID、IP、6 位配对码（120 秒有效）、已配对设备、开关和超时；真实 desktop 验证截图见 `docs/screenshots/84-panel-live.png`
 - 图标使用 `绘制图标.png` 生成的 Q 版鲸鱼 adaptive icon，生成脚本为 `tools/make_icon.py`
 
 本机这份是开发态：目录联接 + `dsh.profile.bundles` 里写着 `"dsh-mobile-bridge"`，改 `host/` 里的代码立即生效。
+
+> 0.3.1 起 `/api/workspaces` 会返回每个工作区的 `sessionIds`，手机端按它做工作区分组；旧版桥接没有该字段时，App 会退回按会话 `cwd` 归组。0.3.0 新增图片 prompt、`/api/discovery` 和局域网/Tailscale 端点上报。host bundle 只在 DSH 启动时加载，升级后需要完整退出并重启 DSH（不是只按 F5），`/api/info` 才会带 `endpoints` 和图片能力。如果 DSH 跑在虚拟机里，Tailscale 必须装在虚拟机内，或按下面的“备用地址”方式把宿主机的 tailnet 转发地址告诉手机。
 
 ## 打包为可分发插件
 
@@ -79,13 +89,13 @@ dist/                 debug APK 与插件 tgz 产物
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.1.0.tgz（约 138 KB / 17 个文件）
+# → dist/dsh-mobile-bridge-0.3.1.tgz（约 140 KB / 18 个文件）
 ```
 
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.1.0.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.3.1.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
@@ -94,13 +104,63 @@ dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.1.0
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.1.0-debug.apk`。
-2. 手机与电脑连同一个 Wi-Fi。
-3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`。
+1. 安装 `dist/TS7-DSH-Remote-0.6.0-debug.apk`。
+2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
+3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
-5. 配对成功后 token 保存在本机，后续自动重连。
+5. 配对成功后 token 保存在本机，后续自动重连；局域网和 Tailscale 两条线路会自动选择，无需手动切换。
+6. 需要更多主机时，在 App 顶部的「主机 +」或 设置 → 添加另一台主机，重复 2–5。每台主机独立保存 token、任务和审批；同一台电脑运行多个 DSH 实例时，需要给各自的桥接插件配置不同端口。App 按「设备 ID + 端口」区分主机，共用状态文件的多个实例也能分别保留。
+7. 发图片：新建任务页或任务详情输入框点「图片」，从系统相册选 1–4 张；App 会压到长边 1600、单张 ≤ 3.5 MB 后以 base64 随 prompt 发送。模型不支持图片时，DSH 会返回自己的错误。
 
 MuMu 模拟器使用 NAT，宿主地址是 `10.0.2.2`；测试时填 `10.0.2.2:48123`。
+
+如果 DSH 跑在 VMware/VirtualBox 的 NAT 虚拟机里（例如虚拟机 IP 是 `192.168.x.x`），手机既连不上该地址，也收不到虚拟机的 UDP 广播。宿主机需要做两件事：
+
+```powershell
+# 1) TCP：把宿主机 48125 转发到虚拟机的桥接端口
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=48125 connectaddress=203.0.113.20 connectport=48123
+
+# 2) UDP：复制 tools/discovery-relay.example.json 为 tools/discovery-relay.json，改好本机地址后注册发现中继
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-discovery-relay.ps1
+```
+
+`discovery-relay.json` 里填虚拟机的 `target`（`IP:48124`）、宿主机访问转发端口的 `httpUrl`、宿主机的 `publicHost`、转发端口 `publicPort`，以及可选的宿主机 Tailscale 地址 `tailscaleHost` 和显示名 `hostName`。中继监听 `48126/udp`，收到发现包后先查 `/api/discovery`；旧版桥接没有该接口时退回 `/health`，用配置里的显示名补一条应答。应答里的地址统一改写成宿主机地址（`publicHost:publicPort` 和 Tailscale 地址），所以手机看到的是可达的入口，而不是虚拟机的 `192.168.x.x`。App 同时扫描 `48124` 和 `48126`，局域网里的普通 DSH 和 NAT 虚拟机都能自动出现。防火墙需放行 `48126/udp`。更彻底的做法是把虚拟机网卡改成桥接，让虚拟机直接获得路由器网段地址。
+
+## Tailscale 远程
+
+桥接会对每个网卡地址做分类：RFC1918 地址作为局域网端点，`100.64.0.0/10` 地址作为 Tailscale 端点，`/api/info`、`/api/pair` 和 UDP 发现应答都会带上这两类地址。
+
+- App 保存主机时同时保存所有端点；自动重连按「局域网优先、Tailscale 兜底」的顺序逐个探测，再建立 SSE。
+- Android 网络切换（Wi-Fi ↔ 蜂窝）时主动重新探测；SSE 断开后不再死连旧地址，而是重新选路。
+- 如果电脑和手机在同一 Wi-Fi，流量走局域网，不经过 Tailscale；离开后自动切到 tailnet。
+- 同一台电脑的多个端点必须指向同一个桥接实例。换机或重装导致设备 ID 变化时，App 会拒绝该端点，避免把任务发到另一台 DSH。
+- 电脑端只检测是否安装了 Tailscale CLI 并读取其地址，不修改 Tailscale 配置；需要用户自己登录 tailnet。
+- 如果 DSH 在 NAT 虚拟机里、Tailscale 只装在宿主机：在 设置 → 当前主机 → 添加备用地址，填 `宿主机TailscaleIP:转发端口`（例如 `100.x.x.x:48125`）。App 会把这条地址和局域网地址一起保存并自动选路；更彻底的做法是在虚拟机内也登录 Tailscale。
+- App 有两种远程方式，任选其一：安装系统 Tailscale 并开启 VPN；或在 设置 → 远程访问 → 内嵌 TAILSCALE 打开「随 App 启动」，按提示完成一次 tailnet 登录。内嵌节点是 userspace 实现，只有一个回环代理，不接管系统网络，因此不会和系统 Tailscale 或其他 VPN 冲突，但其他 App 也不会因此获得 tailnet 访问。
+- 内嵌模式和系统模式可以同时存在：选路时局域网优先；局域网不可达时，内嵌节点已连接就走内嵌代理，否则仍可走系统 VPN 的直连地址。切换开关或完成登录后，App 会主动重连并重新选路，不需要手动改地址。
+
+### 内嵌 Tailscale（实验）
+
+设置 → 远程访问 → 内嵌 TAILSCALE → 打开「随 App 启动」。首次启动后点「打开 tailnet 登录页」，在浏览器里用与电脑相同的 tailnet 登录；回到 App 后状态变为「Tailscale 已连接」。也可以在设置里粘贴 auth key，App 会重启内嵌节点并直接登录。
+
+- 实现是 `tailscale.com/tsnet` 的 userspace 节点，不创建 `VpnService`；App 只把目标 `100.64.0.0/10` 地址通过 `127.0.0.1` 上的临时代理转发。系统 Tailscale 或其他 VPN 仍可同时运行。
+- 内嵌节点会以独立设备出现在 tailnet 中（默认名 `ts7-...`）。tailnet ACL 需要允许它访问电脑的 `48123/tcp`；电脑端不用改配置。
+- 只代理本 App 的 DSH 流量，其他 App 不会获得 tailnet 访问；App 进程结束或关闭前台服务后节点停止。
+- 只有「已安装并登录系统 Tailscale」和「内嵌节点已登录」两种方式都不可用时才会报连不上。切换内嵌开关会自动断开并重连当前主机。
+- `android/app/libs/gobridge.aar` 是预编译的 tsnet 桥（arm64-v8a + x86_64，约 30 MB）。修改 `android/gobridge/bridge.go` 后需要重新生成：
+
+```powershell
+cd android\gobridge
+$env:JAVA_HOME='..\..\.toolchain\jdk-17'
+$env:ANDROID_HOME='..\..\.toolchain\android-sdk'
+$env:ANDROID_NDK_HOME='..\..\.toolchain\android-sdk\ndk\android-ndk-r27c'
+$env:PATH="$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:PATH"
+$env:GOROOT='..\..\.toolchain\go'
+$env:GOPATH='..\..\.toolchain\go-home'
+& '..\..\.toolchain\go-home\bin\gomobile.exe' bind '-target=android/arm64,android/amd64' '-androidapi' '26' '-o' '..\app\libs\gobridge.aar' '.'
+```
+
+README 的构建命令仍可直接构建 APK；AAR 已提交，普通 Android 构建不需要 Go 工具链。debug 包把两个 ABI 都打进去，约 150 MB；发布时建议用 App Bundle 或按 ABI 拆分。
 
 ## 删除与过滤
 
@@ -162,9 +222,9 @@ npm run check
 npm test
 ```
 
-当前 22 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、旧会话过滤与文件删除。
+当前 26 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报。
 
-MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连。亮色 UI 截图见 `docs/screenshots/50-light-connect.png`、`51-light-session.png`；Q 版图标见 `54-chibi-icon.png`；过滤后的任务列表见 `55-filtered-tasks.png`；DSH 侧栏控制面板见 `docs/screenshots/84-panel-live.png`。
+MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI 截图见 `docs/screenshots/50-light-connect.png`、`51-light-session.png`；Q 版图标见 `54-chibi-icon.png`；过滤后的任务列表见 `55-filtered-tasks.png`；DSH 侧栏控制面板见 `docs/screenshots/84-panel-live.png`。
 
 DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧栏出现「手机远控」按钮，点击后弹出面板，能读取桥接状态、设备、配对码和设备列表；修复 `BRIDGE_PORT` 未定义后，按钮在面板关闭后仍保持存在，错误边界与 `dsh-app://app` CORS 生效。截图 `84-panel-live.png` 即真实 desktop 面板。
 
@@ -178,17 +238,18 @@ DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧�
 |---|---|---|
 | GET | `/health` | 无鉴权健康检查 |
 | GET | `/` | 已移除，返回 404（控制端在 DSH 侧栏） |
+| GET | `/api/discovery` | 未鉴权发现应答（与 UDP 广播同内容，供 NAT 中继查询） |
 | GET | `/api/setup/state` | 控制面板状态（仅 loopback） |
 | POST | `/api/setup/{code,revoke,settings,reset}` | 本机设置（CSRF） |
 | POST | `/api/pair` | 6 位码换 token |
 | GET | `/api/info` | 桥接/设备/设置信息 |
-| GET | `/api/workspaces` | 工作区列表 |
+| GET | `/api/workspaces` | 工作区列表（含 `sessionIds`） |
 | GET | `/api/sessions?q=` | 任务列表 |
-| POST | `/api/sessions` | 创建任务，可带 prompt/plan/permission |
+| POST | `/api/sessions` | 创建任务，可带 prompt/plan/permission/images |
 | DELETE | `/api/sessions/:id` | 彻底删除会话日志（运行中拒绝） |
 | GET | `/api/sessions/:id` | 会话详情 + pending |
 | GET | `/api/sessions/:id/history` | 历史事件 |
-| POST | `/api/sessions/:id/{prompt,cancel,rename,permission,plan}` | 任务操作 |
+| POST | `/api/sessions/:id/{prompt,cancel,rename,permission,plan}` | 任务操作；prompt 可带 `images` |
 | POST | `/api/subscribe` / `/api/unsubscribe` | 订阅会话流 |
 | GET | `/api/pending` | 全部待处理 |
 | POST | `/api/approvals/:id` | `{action:'allow-once'|'reject'}` |
@@ -199,13 +260,13 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 安全模型
 
-- 只绑定局域网，不做公网穿透，不支持 TLS。
+- 桥接绑定 `0.0.0.0`，不做公网端口映射或中继；远程访问只依赖 Tailscale 的 WireGuard 加密隧道，应用层仍是明文 HTTP。
 - token 是 `dshm_` + 32 字节随机数，服务端只存 SHA-256；撤销后立即失效。
 - 配对码 120 秒、单码 5 次失败、单 IP 每分钟 10 次。
-- 面板和 `/api/setup/*` 只允许 loopback；DSH 页面跨端口访问时校验 Origin，并保留 CSRF。
+- 面板的 `/api/setup/*` 只允许 loopback；DSH 页面跨端口访问时校验 Origin，并保留 CSRF。
 - 状态文件：`$DSH_HOME/storages/mobile-bridge/state.json`，原子写，权限 600。
-- 手机端 token 目前明文存在 SharedPreferences（Keystore 加密未实现）；不要 root 手机或共享备份。
-- App 开启 `usesCleartextTraffic`，仅用于局域网 HTTP。
+- 手机的 token 目前明文存在 SharedPreferences（Keystore 加密未实现）；不要 root 手机或共享备份。
+- App 开启 `usesCleartextTraffic`：局域网里是明文 HTTP；Tailscale 隧道本身加密，但应用层没有额外 TLS。
 
 ## 已知限制
 
@@ -214,12 +275,17 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 - 删除会话是直接删日志目录，不可恢复；运行中的会话会拒绝删除。
 - 计划模式依赖 `/plan` 命令；若某个 profile 没有加载 `@deepseek-ai/dsh-plan-mode`，接口返回 501。
 - 审批默认超时：审批 120 秒、普通提问 120 秒、plan-review 180 秒，可在「手机远控」面板调整。
-- 不支持附件、模型切换、fork、子代理控制、always-allow、公网、iOS。
+- 不支持模型切换、fork、子代理控制、always-allow、公网映射、iOS。
+- 图片是否被理解取决于当前会话模型；不支持图片的模型会在 DSH 侧报错，App 不做模型能力预判。
+- Tailscale 自动切换依赖电脑在 tailnet 内；手机可以用系统 Tailscale VPN，也可以启用 App 内嵌节点。内嵌节点需要一次 tailnet 登录，且只代理本 App 流量，不提供 MagicDNS/其他 App 的系统级访问。
+- 内嵌节点目前只支持 arm64-v8a 和 x86_64 两种 ABI；32 位设备请改用系统 Tailscale。
+- 虚拟机自动发现依赖宿主机上的 `discovery-relay` 常驻；只做 TCP 端口转发时仍可手动填 `宿主机IP:转发端口`。
 - 工具参数/结果在手机上会截断（正文 4000 字、参数 800 字），用于展示而非完整导出。
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.1.0-debug.apk`
+- `dist/TS7-DSH-Remote-0.6.0-debug.apk`
+- `dist/dsh-mobile-bridge-0.3.1.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `docs/screenshots/`（MuMu 联调截图）
