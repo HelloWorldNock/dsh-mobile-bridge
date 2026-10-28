@@ -81,7 +81,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 本机这份是开发态：目录联接 + `dsh.profile.bundles` 里写着 `"dsh-mobile-bridge"`，改 `host/` 里的代码立即生效。
 
-> 0.3.1 起 `/api/workspaces` 会返回每个工作区的 `sessionIds`，手机端按它做工作区分组；旧版桥接没有该字段时，App 会退回按会话 `cwd` 归组。0.3.0 新增图片 prompt、`/api/discovery` 和局域网/Tailscale 端点上报。host bundle 只在 DSH 启动时加载，升级后需要完整退出并重启 DSH（不是只按 F5），`/api/info` 才会带 `endpoints` 和图片能力。如果 DSH 跑在虚拟机里，Tailscale 必须装在虚拟机内，或按下面的“备用地址”方式把宿主机的 tailnet 转发地址告诉手机。
+> 0.3.1 起 `/api/workspaces` 会返回每个工作区的 `sessionIds`，手机端按它做工作区分组；旧版桥接没有该字段、工作区列表为空或路径大小写不一致时，App 会退回按会话 `cwd` 归组，不再把所有任务塞进“未归类”。0.3.0 新增图片 prompt、`/api/discovery` 和局域网/Tailscale 端点上报。host bundle 只在 DSH 启动时加载，升级后需要完整退出并重启 DSH（不是只按 F5），`/api/info` 才会带 `endpoints` 和图片能力。如果 DSH 跑在虚拟机里，Tailscale 必须装在虚拟机内，或按下面的“备用地址”方式把宿主机的 tailnet 转发地址告诉手机。
 
 ## 打包为可分发插件
 
@@ -104,7 +104,7 @@ dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.3.1
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.6.0-debug.apk`。
+1. 安装 `dist/TS7-DSH-Remote-0.6.1-debug.apk`。
 2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
 3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
@@ -284,7 +284,7 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.6.0-debug.apk`
+- `dist/TS7-DSH-Remote-0.6.1-debug.apk`
 - `dist/dsh-mobile-bridge-0.3.1.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）

@@ -248,11 +248,15 @@ private fun buildWorkspaceGroups(
     val byId = sessions.associateBy { it.id }
     val claimed = mutableSetOf<String>()
     val groups = workspaces.mapNotNull { workspace ->
-        val members = if (workspace.sessionIds.isNotEmpty()) {
-            workspace.sessionIds.mapNotNull { byId[it] }
-        } else {
-            sessions.filter { it.cwd == workspace.path }
-        }.distinctBy { it.id }
+        val idMembers = workspace.sessionIds.mapNotNull { sessionId ->
+            byId[sessionId]
+                ?: byId["session-$sessionId"]
+                ?: byId[sessionId.removePrefix("session-")]
+        }
+        // Older bridges may have no sessionIds, or the workspace may have been
+        // recreated with new ids while the sessions still live under its path.
+        val pathMembers = sessions.filter { samePath(it.cwd, workspace.path) && it.id !in claimed }
+        val members = (idMembers + pathMembers).filterNot { it.id in claimed }.distinctBy { it.id }
         claimed += members.map { it.id }
         if (members.isEmpty()) null
         else WorkspaceGroup(
@@ -260,21 +264,41 @@ private fun buildWorkspaceGroups(
             title = workspace.title?.takeIf { it.isNotBlank() }
                 ?: workspace.path.substringAfterLast('\\').substringAfterLast('/').ifBlank { "未命名工作区" },
             path = workspace.path,
-            sessions = members.sortedWith(
-                compareByDescending<SessionSummary> { it.running }.thenByDescending { it.updatedAt ?: 0L }
-            )
+            sessions = sortSessions(members)
         )
     }
-    val orphans = sessions.filterNot { it.id in claimed }
-    if (orphans.isEmpty()) return groups
-    return groups + WorkspaceGroup(
+    val remaining = sessions.filterNot { it.id in claimed }
+    val cwdGroups = remaining
+        .filter { !it.cwd.isNullOrBlank() }
+        .groupBy { it.cwd!! }
+        .entries
+        .sortedByDescending { entry -> entry.value.maxOfOrNull { it.updatedAt ?: 0L } ?: 0L }
+        .map { (path, members) ->
+            WorkspaceGroup(
+                id = "cwd:$path",
+                title = path.substringAfterLast('\\').substringAfterLast('/').ifBlank { path },
+                path = path,
+                sessions = sortSessions(members)
+            )
+        }
+    val orphans = remaining.filter { it.cwd.isNullOrBlank() }
+    if (orphans.isEmpty()) return groups + cwdGroups
+    return groups + cwdGroups + WorkspaceGroup(
         id = "__unfiled__",
         title = "未归类",
         path = "",
-        sessions = orphans.sortedWith(
-            compareByDescending<SessionSummary> { it.running }.thenByDescending { it.updatedAt ?: 0L }
-        )
+        sessions = sortSessions(orphans)
     )
+}
+
+private fun sortSessions(items: List<SessionSummary>): List<SessionSummary> =
+    items.sortedWith(
+        compareByDescending<SessionSummary> { it.running }.thenByDescending { it.updatedAt ?: 0L }
+    )
+
+private fun samePath(left: String?, right: String?): Boolean {
+    if (left.isNullOrBlank() || right.isNullOrBlank()) return false
+    return left.trimEnd('\\', '/').equals(right.trimEnd('\\', '/'), ignoreCase = true)
 }
 
 @Composable
