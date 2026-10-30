@@ -21,6 +21,17 @@ window.__ModuleLoader__.load({
     const BRIDGE_PORT = 48123
     const BASE = `http://127.0.0.1:${BRIDGE_PORT}`
     const STYLE_ID = "dsh-mobile-bridge-client-css"
+    const TS_PHASE = {
+      off: "未启用",
+      starting: "启动中",
+      running: "已连接",
+      "needs-login": "待登录",
+      stopped: "已停止",
+      error: "出错",
+      unknown: "未知",
+      "binary-missing": "缺少节点程序",
+    }
+    const TS_TONE = { running: "ok", starting: "warn", "needs-login": "warn", error: "bad", "binary-missing": "bad" }
 
     function ensureStyle() {
       if (typeof document === "undefined" || document.getElementById(STYLE_ID)) return
@@ -84,6 +95,15 @@ body[data-ds-dark-theme] .dmb-setting .hint{color:#98A4B8}
 .dmb-switch:checked::after{transform:translateX(16px)}
 .dmb-switch:focus-visible{outline:2px solid #4D6BFE;outline-offset:2px}
 .dmb-alert{border-radius:10px;padding:10px 12px;font-size:12px;background:rgba(220,38,38,.08);color:#DC2626}
+.dmb-input{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}
+.dmb-input:focus-visible{outline:2px solid #4D6BFE;outline-offset:1px}
+.dmb-tag{font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(127,127,127,.14);color:#667085;flex:none}
+.dmb-tag.ok{background:rgba(22,163,74,.14);color:#16A34A}
+.dmb-tag.warn{background:rgba(217,119,6,.16);color:#B45309}
+.dmb-tag.bad{background:rgba(220,38,38,.12);color:#DC2626}
+.dmb-log{margin-top:10px;max-height:130px;overflow:auto;padding:9px 11px;border-radius:10px;background:rgba(127,127,127,.08);font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-all}
+.dmb-row{display:flex;align-items:center;gap:8px}
+.dmb-row .grow{flex:1;min-width:0}
 .dmb-foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;font-size:11px;color:#667085}
 body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
 .dmb-saved{font-size:12px;color:#16A34A}
@@ -152,6 +172,10 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const [busy, setBusy] = useState("")
       const [now, setNow] = useState(Date.now())
       const csrf = useRef("")
+      const [tsHost, setTsHost] = useState("")
+      const [tsDir, setTsDir] = useState("")
+      const [tsKey, setTsKey] = useState("")
+      const [tsOpen, setTsOpen] = useState(false)
 
       const load = useCallback(async () => {
         try {
@@ -159,6 +183,8 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
           csrf.current = data.csrf || ""
           setSnap(data)
           setError("")
+          setTsHost((current) => current || data.tailscale?.hostname || "")
+          setTsDir((current) => current || data.tailscale?.stateDir || "")
           setForm((current) => current || {
             phoneFirst: data.settings.phoneFirst !== false,
             discovery: data.settings.discovery !== false,
@@ -261,6 +287,10 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const total = 120
       const percent = Math.max(0, Math.min(100, (left / total) * 100))
       const online = Boolean(snap) && !error
+      const ts = snap ? snap.tailscale ?? null : null
+      const tsPhase = ts ? ts.phase || "off" : "off"
+      const tsEnabled = ts ? ts.enabled === true : false
+      const tsLog = ts && Array.isArray(ts.log) ? ts.log : []
 
       return h(
         "div",
@@ -322,6 +352,168 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                   { className: "dmb-sub", style: { marginTop: 8, lineHeight: 1.6 } },
                   "手机在局域网内会自动走局域网地址；离开局域网后，如果手机和电脑登录同一个 Tailscale，会自动切换到 Tailscale 地址。",
                 ),
+              )
+            : null,
+          snap && ts
+            ? h(
+                "div",
+                { className: "dmb-card" },
+                h(
+                  "div",
+                  { className: "dmb-row", style: { justifyContent: "space-between", marginBottom: 6 } },
+                  h("div", { className: "dmb-label", style: { marginBottom: 0 } }, "内置 Tailscale 节点"),
+                  h("span", { className: `dmb-tag ${TS_TONE[tsPhase] || ""}` }, TS_PHASE[tsPhase] || tsPhase),
+                ),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, "在本机运行 Tailscale 节点"),
+                    h("div", { className: "hint" }, "开启后这台电脑不用装 Tailscale 客户端，手机在任意网络都能通过 tailnet 直连。"),
+                  ),
+                  h("input", {
+                    className: "dmb-switch",
+                    type: "checkbox",
+                    checked: tsEnabled,
+                    disabled: busy !== "",
+                    onChange: async (event) => {
+                      await post("ts-toggle", "/api/setup/tailscale", { action: event.target.checked ? "enable" : "disable" })
+                    },
+                  }),
+                ),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, "节点名"),
+                    h("div", { className: "hint" }, "tailnet 里显示的设备名，改完自动重启节点。"),
+                  ),
+                  h("input", {
+                    className: "dmb-input",
+                    style: { width: 176 },
+                    value: tsHost,
+                    placeholder: ts.hostname || "dsh-bridge",
+                    onChange: (event) => setTsHost(event.target.value),
+                    onBlur: async () => {
+                      const value = tsHost.trim()
+                      if (value === "" || value === (ts.hostname || "")) return
+                      await post("ts-host", "/api/setup/tailscale", { action: "hostname", value })
+                    },
+                  }),
+                ),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, "状态目录"),
+                    h(
+                      "div",
+                      { className: "hint" },
+                      "节点把密钥与日志写在这里；被安全软件拦截时换成可写目录（清空恢复默认）。",
+                    ),
+                  ),
+                  h("input", {
+                    className: "dmb-input",
+                    style: { width: 260 },
+                    value: tsDir,
+                    placeholder: ts.stateDir || "",
+                    onChange: (event) => setTsDir(event.target.value),
+                    onBlur: async () => {
+                      const value = tsDir.trim()
+                      if (value === (ts.stateDir || "")) return
+                      await post("ts-dir", "/api/setup/tailscale", { action: "statedir", value })
+                    },
+                  }),
+                ),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, "授权密钥"),
+                    h(
+                      "div",
+                      { className: "hint" },
+                      snap.settings.hasTailscaleAuthKey
+                        ? "已保存密钥，留空表示不修改。"
+                        : "tskey-auth-… 留空则需在浏览器里完成一次登录。",
+                    ),
+                  ),
+                  h("input", {
+                    className: "dmb-input",
+                    style: { width: 200 },
+                    type: "password",
+                    autoComplete: "off",
+                    value: tsKey,
+                    placeholder: snap.settings.hasTailscaleAuthKey ? "已保存" : "tskey-auth-…",
+                    onChange: (event) => setTsKey(event.target.value),
+                  }),
+                  h(
+                    "button",
+                    {
+                      className: "dmb-btn",
+                      disabled: busy !== "" || tsKey.trim() === "",
+                      onClick: async () => {
+                        const value = tsKey.trim()
+                        if (value === "") return
+                        if (await post("ts-key", "/api/setup/tailscale", { action: "authkey", value })) setTsKey("")
+                      },
+                    },
+                    busy === "ts-key" ? "保存中…" : "保存密钥",
+                  ),
+                ),
+                ts.error ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, ts.error) : null,
+                ts.authUrl
+                  ? h(
+                      "div",
+                      { className: "dmb-sub", style: { marginTop: 10, lineHeight: 1.6 } },
+                      "需要在浏览器完成授权：",
+                      h(
+                        "a",
+                        { href: ts.authUrl, target: "_blank", rel: "noreferrer", style: { color: "#4D6BFE" } },
+                        ts.authUrl,
+                      ),
+                    )
+                  : null,
+                ts.ip4 || ts.tailnet || ts.listening
+                  ? h(
+                      "div",
+                      { className: "dmb-ips" },
+                      ts.ip4 ? h("span", { className: "dmb-chip dmb-mono" }, ts.ip4) : null,
+                      ts.tailnet ? h("span", { className: "dmb-chip" }, ts.tailnet) : null,
+                      ts.listening && !/^(?:0\.0\.0\.0|\[::\]|):/.test(ts.listening) ? h("span", { className: "dmb-chip dmb-mono" }, ts.listening) : null,
+                      ts.peers ? h("span", { className: "dmb-chip" }, `tailnet ${ts.peers} 台设备`) : null,
+                    )
+                  : null,
+                Array.isArray(ts.health) && ts.health.length > 0
+                  ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, ts.health.join("；"))
+                  : null,
+                h(
+                  "div",
+                  { className: "dmb-actions", style: { marginTop: 12 } },
+                  h(
+                    "button",
+                    {
+                      className: "dmb-btn",
+                      disabled: busy !== "" || !tsEnabled,
+                      onClick: async () => {
+                        await post("ts-restart", "/api/setup/tailscale", { action: "restart" })
+                      },
+                    },
+                    busy === "ts-restart" ? "重启中…" : "重启节点",
+                  ),
+                  tsLog.length > 0
+                    ? h("button", { className: "dmb-btn", onClick: () => setTsOpen(!tsOpen) }, tsOpen ? "收起日志" : "查看日志")
+                    : null,
+                ),
+                tsOpen && tsLog.length > 0 ? h("div", { className: "dmb-log" }, tsLog.slice(-14).join("\n")) : null,
               )
             : null,
           snap

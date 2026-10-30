@@ -48,8 +48,11 @@ export function classifyAddress(name, address) {
  * Build ordered connection candidates: LAN first, then Tailscale.
  * The phone probes candidates in order, so it uses the LAN at home and
  * falls back to the tailnet address when the phone leaves the network.
+ *
+ * `extra` carries endpoints that do not appear as a network interface — the
+ * embedded tailnet node from lib/tailscale.js is the only current source.
  */
-export function bridgeEndpoints(port, interfaces = os.networkInterfaces()) {
+export function bridgeEndpoints(port, interfaces = os.networkInterfaces(), extra = []) {
   const seen = new Set()
   const lan = []
   const tailscale = []
@@ -64,9 +67,21 @@ export function bridgeEndpoints(port, interfaces = os.networkInterfaces()) {
       else lan.push(endpoint)
     }
   }
+  for (const endpoint of extra ?? []) {
+    if (endpoint === null || typeof endpoint !== 'object') continue
+    const address = endpoint.address
+    if (typeof address !== 'string' || address === '' || seen.has(address)) continue
+    seen.add(address)
+    tailscale.push({
+      ...endpoint,
+      kind: 'tailscale',
+      address,
+      url: typeof endpoint.url === 'string' && endpoint.url !== '' ? endpoint.url : `http://${address}:${port}`
+    })
+  }
   return [...lan, ...tailscale]
 }
 
-export function tailscaleEndpoints(port, interfaces = os.networkInterfaces()) {
-  return bridgeEndpoints(port, interfaces).filter((endpoint) => endpoint.kind === 'tailscale')
+export function tailscaleEndpoints(port, interfaces = os.networkInterfaces(), extra = []) {
+  return bridgeEndpoints(port, interfaces, extra).filter((endpoint) => endpoint.kind === 'tailscale')
 }

@@ -6,15 +6,15 @@
 
 ## 功能
 
-- 任务列表：按桌面端工作区分组，点标题折叠/展开；搜索会匹配工作区、标题和目录
+- 任务列表：按桌面端工作区分组，默认全部收起（只看工作区名、会话数和运行中数量），点标题展开/收起；搜索时自动展开匹配的工作区，并匹配工作区、标题和目录
 - 多主机：同时配对并保持多台 DSH 的 SSE 连接，顶部主机胶囊一键切换；各主机的任务、审批和通知互不串台
 - 局域网/远程自动切换：电脑开启 Tailscale 时，插件同时广播局域网和 tailnet 地址；手机离开 Wi-Fi 自动改走 Tailscale，回到局域网自动切回直连
 - 内嵌 Tailscale（实验）：App 自带 userspace tsnet 节点，不占用系统 VPN，可与系统 Tailscale 或其他 VPN 共存；设置里一键随 App 启动/停止，只把本 App 的 DSH 流量送进 tailnet
 - 彻底删除：任务详情菜单可直接删除会话日志（不可恢复）
-- 新建任务：选择工作区、输入 prompt、可选计划模式/权限预设
+- 新建任务：工作区列表与桌面端同步（取不到时退回最近会话目录并给出重试）；选择工作区、输入 prompt、可选计划模式/权限预设
 - 图片：新建任务或继续任务时最多附带 4 张 PNG/JPEG/WebP/GIF，App 先压到长边 1600、单张 ≤ 3.5 MB；是否理解图片取决于当前 DSH 模型
 - 虚拟机自动发现：宿主机跑一个 UDP 中继，把手机的发现包转发给 NAT 虚拟机，手机不用再手填转发地址
-- 任务详情：时间线、工具调用与结果、流式回复、停止/重命名
+- 任务详情：默认只显示对话、轮次状态和错误，工具调用合并成一行摘要（如「执行 5 步 · Bash, Read」），点摘要或菜单「显示执行细节」才展开完整过程；流式回复、停止/重命名
 - 权限审批：手机优先弹出审批卡；允许一次/拒绝；无人接管时回退桌面
 - 计划审阅：plan-review 卡片展示完整计划，批准后退出计划模式并继续执行
 - 普通提问：单选/多选/自定义回答
@@ -81,7 +81,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 本机这份是开发态：目录联接 + `dsh.profile.bundles` 里写着 `"dsh-mobile-bridge"`，改 `host/` 里的代码立即生效。
 
-> 0.3.1 起 `/api/workspaces` 会返回每个工作区的 `sessionIds`，手机端按它做工作区分组；旧版桥接没有该字段、工作区列表为空或路径大小写不一致时，App 会退回按会话 `cwd` 归组，不再把所有任务塞进“未归类”。0.3.0 新增图片 prompt、`/api/discovery` 和局域网/Tailscale 端点上报。host bundle 只在 DSH 启动时加载，升级后需要完整退出并重启 DSH（不是只按 F5），`/api/info` 才会带 `endpoints` 和图片能力。如果 DSH 跑在虚拟机里，Tailscale 必须装在虚拟机内，或按下面的“备用地址”方式把宿主机的 tailnet 转发地址告诉手机。
+> 0.3.1 起 `/api/workspaces` 会返回每个工作区的 `sessionIds`，手机端按它做工作区分组；旧版桥接没有该字段、工作区列表为空或路径大小写不一致时，App 会退回按会话 `cwd` 归组，不再把所有任务塞进“未归类”。0.3.2 把工作区 `updatedAt` 统一成毫秒数，修掉新版 DSH 下手机端「没有可用工作区」。0.3.0 新增图片 prompt、`/api/discovery` 和局域网/Tailscale 端点上报。host bundle 只在 DSH 启动时加载，升级后需要完整退出并重启 DSH（不是只按 F5），`/api/info` 才会带 `endpoints` 和图片能力。如果 DSH 跑在虚拟机里，Tailscale 必须装在虚拟机内，或按下面的“备用地址”方式把宿主机的 tailnet 转发地址告诉手机。
 
 ## 打包为可分发插件
 
@@ -89,13 +89,13 @@ dist/                 debug APK 与插件 tgz 产物
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.3.1.tgz（约 140 KB / 18 个文件）
+# → dist/dsh-mobile-bridge-0.3.2.tgz（约 140 KB / 18 个文件）
 ```
 
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.3.1.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.3.2.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
@@ -104,7 +104,7 @@ dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.3.1
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.6.1-debug.apk`。
+1. 安装 `dist/TS7-DSH-Remote-0.7.2-debug.apk`。
 2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
 3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
@@ -134,8 +134,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-discovery-rela
 - Android 网络切换（Wi-Fi ↔ 蜂窝）时主动重新探测；SSE 断开后不再死连旧地址，而是重新选路。
 - 如果电脑和手机在同一 Wi-Fi，流量走局域网，不经过 Tailscale；离开后自动切到 tailnet。
 - 同一台电脑的多个端点必须指向同一个桥接实例。换机或重装导致设备 ID 变化时，App 会拒绝该端点，避免把任务发到另一台 DSH。
-- 电脑端只检测是否安装了 Tailscale CLI 并读取其地址，不修改 Tailscale 配置；需要用户自己登录 tailnet。
-- 如果 DSH 在 NAT 虚拟机里、Tailscale 只装在宿主机：在 设置 → 当前主机 → 添加备用地址，填 `宿主机TailscaleIP:转发端口`（例如 `100.x.x.x:48125`）。App 会把这条地址和局域网地址一起保存并自动选路；更彻底的做法是在虚拟机内也登录 Tailscale。
+- 电脑端有两种方式加入 tailnet：装系统 Tailscale 并自己登录（桥接只读取它的地址），或者在手机远控面板里打开「内置 Tailscale 节点」（见下节），后者不需要安装任何东西。
+- 如果 DSH 在 NAT 虚拟机里、Tailscale 只装在宿主机：在 设置 → 当前主机 → 添加备用地址，填 `宿主机TailscaleIP:转发端口`（例如 `100.x.x.x:48125`）。App 会把这条地址和局域网地址一起保存并自动选路；更彻底的做法是在虚拟机内也登录 Tailscale，或在宿主机上开内置节点并把 48123 转发进虚拟机。
 - App 有两种远程方式，任选其一：安装系统 Tailscale 并开启 VPN；或在 设置 → 远程访问 → 内嵌 TAILSCALE 打开「随 App 启动」，按提示完成一次 tailnet 登录。内嵌节点是 userspace 实现，只有一个回环代理，不接管系统网络，因此不会和系统 Tailscale 或其他 VPN 冲突，但其他 App 也不会因此获得 tailnet 访问。
 - 内嵌模式和系统模式可以同时存在：选路时局域网优先；局域网不可达时，内嵌节点已连接就走内嵌代理，否则仍可走系统 VPN 的直连地址。切换开关或完成登录后，App 会主动重连并重新选路，不需要手动改地址。
 
@@ -161,6 +161,28 @@ $env:GOPATH='..\..\.toolchain\go-home'
 ```
 
 README 的构建命令仍可直接构建 APK；AAR 已提交，普通 Android 构建不需要 Go 工具链。debug 包把两个 ABI 都打进去，约 150 MB；发布时建议用 App Bundle 或按 ABI 拆分。
+
+### 内嵌 Tailscale（电脑端）
+
+侧边栏「手机远控」面板里有一张「内置 Tailscale 节点」卡片。打开开关后，桥接插件会在本机拉起一个 `tsnode` 子进程：它用 `tailscale.com/tsnet` 建 userspace 节点、以独立设备加入 tailnet，再把 tailnet 上的 `<端口>/tcp` 转发到本机 `127.0.0.1:48123`。电脑不需要安装 Tailscale 客户端，也不会接管系统网络（不建 TUN、不改路由），因此可以和系统 Tailscale 同时存在。
+
+- 首次开启后卡片会显示登录地址，浏览器打开完成一次 tailnet 授权即可；也可以直接粘贴 auth key（`tskey-auth-…`）保存，节点会立刻重启并用 key 登录。
+- 节点名默认 `dsh-<设备 ID 前段>`，可在卡片里改（DNS 安全字符，最长 63）；改完自动重启节点。
+- 内置节点上线后，`/api/info`、`/api/pair` 和 UDP 发现应答里会多一条 `kind: "tailscale"`、`source: "embedded"` 的端点，手机端选路逻辑不用改。
+- tailnet ACL 需要允许手机访问这台电脑的 `48123/tcp`；节点本身只能被动监听，不做 relay 或 exit node。
+- 断线后按 2s → 5s → 10s → 20s → 40s → 60s 退避重启，连续失败则停止重试并在卡片里报错；改端口（`port` 配置）时会自动重启节点。
+- 子进程随插件生命周期启停：桥接关闭、DSH 退出或 stdin 断开时节点自动下线（`--ephemeral=false`，key 持久化在 `$DSH_HOME/storages/mobile-bridge/tsnet`，重启不用重新登录）。
+- 状态目录可以改：卡片里的「状态目录」填绝对路径即可；也可以用 `DSH_MOBILE_BRIDGE_TSNET_DIR` 环境变量（面板留空时生效）。默认目录不可写时会自动依次回退到 `<插件目录>/.tsnet-state`、系统临时目录，成功后把结果记进设置，下次直接用。
+- 二进制在 `host/bin/tsnode-<平台>-<架构>`。Windows/amd64 已随包提供。其他平台或改了 `host/tsnode/main.go` 后重新构建：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-tsnode.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-tsnode.ps1 -Goos linux -Arch arm64
+```
+
+依赖全部来自仓库内的 `.toolchain/go-home` 模块缓存，默认离线构建（`GOPROXY=off`）；需要联网解析新依赖时加 `-Online`。
+
+- 如果卡片报 `Access is denied` / `open ...tailscaled.log.conf: Access is denied`，说明安全软件拦了新编译的未签名二进制写文件：把 `host\bin\tsnode-*.exe` 加进信任列表（360 安全卫士、火绒等都会如此），再点「重启节点」。
 
 ## 删除与过滤
 
@@ -222,7 +244,7 @@ npm run check
 npm test
 ```
 
-当前 26 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报。
+当前 27 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报。
 
 MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI 截图见 `docs/screenshots/50-light-connect.png`、`51-light-session.png`；Q 版图标见 `54-chibi-icon.png`；过滤后的任务列表见 `55-filtered-tasks.png`；DSH 侧栏控制面板见 `docs/screenshots/84-panel-live.png`。
 
@@ -284,8 +306,8 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.6.1-debug.apk`
-- `dist/dsh-mobile-bridge-0.3.1.tgz`
+- `dist/TS7-DSH-Remote-0.7.2-debug.apk`
+- `dist/dsh-mobile-bridge-0.3.2.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `docs/screenshots/`（MuMu 联调截图）

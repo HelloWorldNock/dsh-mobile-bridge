@@ -8,7 +8,7 @@ const ANNOUNCE_TYPE = 'dsh-remote-bridge'
  * Answer LAN discovery probes from the Android app. The reply carries only
  * non-secret addressing data; pairing still needs the 6-digit code.
  */
-export function createDiscovery({ port, bridgePort, deviceId, hostName, version, logger }) {
+export function createDiscovery({ port, bridgePort, deviceId, hostName, version, logger, extraEndpoints = () => [] }) {
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true })
   let closed = false
 
@@ -30,6 +30,12 @@ export function createDiscovery({ port, bridgePort, deviceId, hostName, version,
       return
     }
     if (probe === null || typeof probe !== 'object' || probe.type !== DISCOVER_TYPE) return
+    let extra = []
+    try {
+      extra = extraEndpoints() ?? []
+    } catch (error) {
+      logger?.warn?.(`[mobile-bridge] discovery endpoint lookup failed: ${String(error?.message ?? error)}`)
+    }
     const reply = Buffer.from(
       JSON.stringify({
         type: ANNOUNCE_TYPE,
@@ -39,7 +45,7 @@ export function createDiscovery({ port, bridgePort, deviceId, hostName, version,
         hostName,
         port: bridgePort,
         tls: false,
-        endpoints: bridgeEndpoints(bridgePort)
+        endpoints: bridgeEndpoints(bridgePort, undefined, extra)
       })
     )
     socket.send(reply, remote.port, remote.address, (error) => {

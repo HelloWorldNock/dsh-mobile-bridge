@@ -116,7 +116,22 @@ function cleanTitle(value) {
   return title
 }
 
-export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange }) {
+// 桌面端工作区记录里的 updatedAt 可能是 Date、ISO 字符串或毫秒数；
+// 统一成毫秒数，避免手机端把工作区列表整段解析失败。
+function toEpochMillis(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (value instanceof Date) {
+    const time = value.getTime()
+    return Number.isFinite(time) ? time : undefined
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const time = Date.parse(value)
+    return Number.isFinite(time) ? time : undefined
+  }
+  return undefined
+}
+
+export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null }) {
   const csrf = randomBytes(24).toString('base64url')
   let server = null
 
@@ -210,12 +225,27 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
   }
 
+  /** LAN interfaces plus the embedded tailnet node, in that order. */
+  function allEndpoints() {
+    return bridgeEndpoints(config.port, undefined, tailscale?.endpoints?.() ?? [])
+  }
+
+  /** Settings 里含 Tailscale 授权密钥，对外一律换成布尔标记。 */
+  function publicSettings() {
+    const { tailscaleAuthKey, tailscaleStateDir, ...rest } = settings
+    return {
+      ...rest,
+      hasTailscaleAuthKey: typeof tailscaleAuthKey === 'string' && tailscaleAuthKey !== ''
+    }
+  }
+
   async function setupState() {
     return {
       ...auth.setupState(),
       port: config.port,
       addresses: lanAddresses(),
-      endpoints: bridgeEndpoints(config.port),
+      endpoints: allEndpoints(),
+      tailscale: tailscale?.status?.() ?? null,
       clients: broadcast.count(),
       csrf,
       version
@@ -254,7 +284,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         hostName: state.hostName,
         port: config.port,
         tls: false,
-        endpoints: bridgeEndpoints(config.port)
+        endpoints: allEndpoints()
       })
       return
     }
@@ -269,8 +299,31 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         sendJson(res, 200, await setupState())
         return
       }
+      if (method === 'GET' && path === '/api/setup/tailscale') {
+        sendJson(res, 200, { tailscale: tailscale?.status?.() ?? null })
+        return
+      }
       if (method !== 'POST') throw new BridgeError('method/not-allowed', '方法不允许', 405)
       checkCsrf(req)
+      if (path === '/api/setup/tailscale') {
+        if (tailscale === null) throw new BridgeError('tailscale/unavailable', '内置 Tailscale 节点不可用', 503)
+        const body = await readJson(req)
+        const action = typeof body.action === 'string' ? body.action : ''
+        if (action === 'enable') await tailscale.setEnabled(true)
+        else if (action === 'disable') await tailscale.setEnabled(false)
+        else if (action === 'authkey') await tailscale.setAuthKey(typeof body.value === 'string' ? body.value : '')
+        else if (action === 'hostname') await tailscale.setHostname(typeof body.value === 'string' ? body.value : '')
+        else if (action === 'statedir') await tailscale.setStateDir(typeof body.value === 'string' ? body.value : '')
+        else if (action === 'restart') await tailscale.restart()
+        else throw new BridgeError('setup/bad-request', '未知的 Tailscale 操作', 400)
+        try {
+          onDiscoveryChange?.()
+        } catch (error) {
+          logger?.warn?.(`[mobile-bridge] discovery notify failed: ${String(error)}`)
+        }
+        sendJson(res, 200, { ok: true, tailscale: tailscale.status() })
+        return
+      }
       if (path === '/api/setup/code') {
         const pairing = auth.rotateCode()
         sendJson(res, 200, { code: pairing.code, expiresAt: new Date(pairing.expiresAt).toISOString() })
@@ -323,7 +376,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         host: {
           ...result.host,
           version,
-          endpoints: bridgeEndpoints(config.port)
+          endpoints: allEndpoints()
         }
       })
       return
@@ -340,11 +393,11 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
           port: config.port,
           discoveryPort: config.discoveryPort,
           addresses: lanAddresses(),
-          endpoints: bridgeEndpoints(config.port),
+          endpoints: allEndpoints(),
           clients: broadcast.count()
         },
         device: { id: device.id, name: device.name },
-        settings: { ...settings }
+        settings: publicSettings()
       })
       return
     }
@@ -356,7 +409,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
           id: workspace.id,
           path: workspace.path,
           title: workspace.title,
-          updatedAt: workspace.updatedAt,
+          updatedAt: toEpochMillis(workspace.updatedAt),
           sessionIds: workspace.sessionIds ?? []
         }))
       })

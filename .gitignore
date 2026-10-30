@@ -22,6 +22,14 @@ node_modules/
 *.log
 *.err.log
 
+# 内置 Tailscale 节点的运行时状态（节点密钥与日志）
+host/.tsnet-state/
+.tmp/
+
+# 内置 Tailscale 节点的编译产物（22 MB，走 GitHub Release 附件；
+# 从源码安装后跑 tools/build-tsnode.ps1 重新生成）
+host/bin/
+
 # 系统文件
 .DS_Store
 Thumbs.db

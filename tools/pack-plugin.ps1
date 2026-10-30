@@ -48,10 +48,18 @@ try {
 
 $tarball = Join-Path (Resolve-Path $Destination).Path $info.filename
 $files = @($info.files.path)
-$required = @('package.json', 'lib/index.js', 'lib/client.js', 'cordis.patch.yml',
+$required = @('package.json', 'lib/index.js', 'lib/client.js', 'lib/tailscale.js', 'cordis.patch.yml',
   'icon.png', 'locale/en.json', 'locale/zh.json', 'README.md', 'LICENSE')
 $missing = @($required | Where-Object { $files -notcontains $_ })
 if ($missing.Count -gt 0) { throw "tgz 缺少文件：$($missing -join ', ')" }
+
+$tsnodeBin = Join-Path $pkgDir 'bin\tsnode-windows-amd64.exe'
+if (-not (Test-Path $tsnodeBin)) {
+  Write-Output '注意：未找到 host\bin\tsnode-windows-amd64.exe，内置 Tailscale 节点在面板里会显示「缺少节点程序」。'
+  Write-Output '      先运行 tools/build-tsnode.ps1 再打包。'
+} elseif ($files -notcontains 'bin/tsnode-windows-amd64.exe') {
+  throw 'tgz 缺少 bin/tsnode-windows-amd64.exe（package.json 的 files 需包含 bin）'
+}
 
 Write-Output "package : $name@$version"
 Write-Output "tarball : $tarball"

@@ -5,11 +5,12 @@ import { createBroadcaster, createSessionHub } from './events.js'
 import { createApprovals } from './approvals.js'
 import { createBridgeServer } from './server.js'
 import { createDiscovery } from './discovery.js'
+import { createTailscale } from './tailscale.js'
 
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.3.1'
+const VERSION = '0.4.0'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,
@@ -42,6 +43,7 @@ export function apply(ctx, config) {
   let stopped = false
   let server = null
   let discovery = null
+  let tailscale = null
   let hub = null
   let approvals = null
   let broadcast = null
@@ -63,6 +65,16 @@ export function apply(ctx, config) {
       settings: state.settings,
       logger
     })
+
+    // Embedded userspace tailnet node: lets a phone on the tailnet reach this
+    // bridge even when the PC has no system Tailscale installed.
+    tailscale = createTailscale({
+      settings: state.settings,
+      save: () => saveState(state, statePath),
+      logger,
+      deviceId: state.deviceId
+    })
+    tailscale.onStatusChange(() => syncDiscovery())
 
     broadcast = createBroadcaster({ logger })
     hub = createSessionHub({
@@ -110,7 +122,8 @@ export function apply(ctx, config) {
           deviceId: state.deviceId,
           hostName: state.hostName,
           version: VERSION,
-          logger
+          logger,
+          extraEndpoints: () => tailscale?.endpoints() ?? []
         })
       } else if (state.settings.discovery !== true && discovery !== null) {
         discovery.close()
@@ -129,10 +142,13 @@ export function apply(ctx, config) {
       logger,
       version: VERSION,
       ctx,
-      onDiscoveryChange: syncDiscovery
+      onDiscoveryChange: syncDiscovery,
+      tailscale
     })
 
     actualPort = await server.listen()
+    await tailscale.configure(actualPort)
+    await tailscale.start()
     syncDiscovery()
     logger.info?.(`[mobile-bridge] listening on http://${cfg.bindHost}:${actualPort} (discovery udp/${cfg.discoveryPort})`)
     logger.info?.(`[mobile-bridge] open http://127.0.0.1:${actualPort}/ on this PC to pair a phone`)
@@ -150,6 +166,7 @@ export function apply(ctx, config) {
         try {
           discovery?.close()
           discovery = null
+          await tailscale?.dispose()
           await server?.close()
           approvals?.dispose()
           hub?.dispose()

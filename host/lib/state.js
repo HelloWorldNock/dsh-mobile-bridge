@@ -44,7 +44,11 @@ export function createDefaultState() {
       discovery: true,
       approvalTimeoutMs: 120_000,
       questionTimeoutMs: 120_000,
-      planReviewTimeoutMs: 180_000
+      planReviewTimeoutMs: 180_000,
+      embeddedTailscale: false,
+      tailscaleAuthKey: '',
+      tailscaleHostname: '',
+      tailscaleStateDir: ''
     }
   }
 }
@@ -79,7 +83,11 @@ function normalizeState(raw) {
       questionTimeoutMs: Number.isFinite(settings.questionTimeoutMs) ? settings.questionTimeoutMs : base.settings.questionTimeoutMs,
       planReviewTimeoutMs: Number.isFinite(settings.planReviewTimeoutMs)
         ? settings.planReviewTimeoutMs
-        : base.settings.planReviewTimeoutMs
+        : base.settings.planReviewTimeoutMs,
+      embeddedTailscale: settings.embeddedTailscale === true,
+      tailscaleAuthKey: typeof settings.tailscaleAuthKey === 'string' ? settings.tailscaleAuthKey.trim() : '',
+      tailscaleHostname: typeof settings.tailscaleHostname === 'string' ? settings.tailscaleHostname.trim() : '',
+      tailscaleStateDir: typeof settings.tailscaleStateDir === 'string' ? settings.tailscaleStateDir.trim() : ''
     }
   }
 }

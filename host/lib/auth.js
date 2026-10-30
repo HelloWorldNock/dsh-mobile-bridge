@@ -93,13 +93,14 @@ export function createAuth({ state, save, settings, logger, now = () => Date.now
 
   function setupState() {
     const code = currentCode()
+    const { tailscaleAuthKey, ...safeSettings } = settings
     return {
       deviceId: state.deviceId,
       hostName: state.hostName,
       code: code.code,
       codeExpiresAt: new Date(code.expiresAt).toISOString(),
       devices: state.devices.map(devicePublic),
-      settings: { ...settings }
+      settings: { ...safeSettings, hasTailscaleAuthKey: typeof tailscaleAuthKey === 'string' && tailscaleAuthKey !== '' }
     }
   }
 
