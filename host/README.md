@@ -13,7 +13,7 @@
 **本地 tarball** —— 先 `npm pack`（或运行仓库里的 `tools/pack-plugin.ps1`）拿到 `dsh-mobile-bridge-0.3.0.tgz`：
 
 ```powershell
-dsh plugin --profile desktop add file:F:\path\to\dsh-mobile-bridge-0.3.0.tgz
+dsh plugin --profile desktop add file:<path-to>\dsh-mobile-bridge-0.3.0.tgz
 ```
 
 **npm** —— 包发布后：
@@ -76,7 +76,7 @@ powershell -NoProfile -File ..\tools\pack-plugin.ps1   # 产物写到仓库根 d
 装包闭环已实测（一次性 profile `pkgtest`）：
 
 ```powershell
-dsh plugin --profile pkgtest add file:F:\...\dist\dsh-mobile-bridge-0.3.0.tgz
+dsh plugin --profile pkgtest add file:<path-to>\dist\dsh-mobile-bridge-0.3.0.tgz
 dsh --profile pkgtest --dump-config | Select-String mobile-bridge
 # - id: mobile-bridge / name: dsh-mobile-bridge / port: 48123 / discoveryPort: 48124 / phoneFirst: true
 ```

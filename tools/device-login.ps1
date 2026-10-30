@@ -14,7 +14,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$DeviceCode,
   [string]$ClientId = '178c6fc778ccc68e1d6a',
-  [string]$Proxy = 'http://127.0.0.1:7890',
+  [string]$Proxy = (if ($env:HTTPS_PROXY) { $env:HTTPS_PROXY } else { 'http://127.0.0.1:7890' }),
   [int]$TimeoutSec = 870,
   [string]$OutFile = (Join-Path $env:TEMP 'gh-device-token.txt')
 )

@@ -54,7 +54,6 @@ tools/                打包脚本 pack-plugin.ps1、图标生成、重启脚本
 android/              Android 客户端（Gradle + Compose）
   gobridge/           内嵌 Tailscale 的 Go 源码（gomobile 生成 AAR）
   app/libs/           预编译 gobridge.aar（arm64-v8a + x86_64）
-docs/screenshots/     MuMu 联调截图
 dist/                 debug APK 与插件 tgz 产物
 .toolchain/           JDK17 / Android SDK / Gradle / Go（本地工具链）
 ```
@@ -66,7 +65,7 @@ dist/                 debug APK 与插件 tgz 产物
 1. `%USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-mobile-bridge` 是指向 `<repo-root>\host` 的目录联接。
 2. `profiles\desktop\package.json` 的 `dsh.profile.bundles` 包含 `"dsh-mobile-bridge"`。
 
-当前桥接已在运行，侧栏「手机远控」按钮与面板已在真实 desktop 窗口验证（`docs/screenshots/84-panel-live.png`）。
+当前桥接已在运行，侧栏「手机远控」按钮与面板已在真实 desktop 窗口验证。
 
 更新 client `/client.js` 后，在 DSH 窗口按 **F5** 刷新页面即可重新加载，不需要重启整个应用；更新 host `server.js` 才会需要重启 Electron。只关闭面板不会重新加载 client。
 
@@ -76,7 +75,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 - 桥接监听 `0.0.0.0:48123`，UDP 发现 `48124`；虚拟机场景由宿主机中继在 `48126/udp` 代答
 - 打开方式：DSH 侧栏底部「手机远控」按钮，或 设置 → 插件 → 手机远控 卡片
-- 面板显示设备 ID、IP、6 位配对码（120 秒有效）、已配对设备、开关和超时；真实 desktop 验证截图见 `docs/screenshots/84-panel-live.png`
+- 面板显示设备 ID、IP、6 位配对码（120 秒有效）、已配对设备、开关和超时
 - 图标使用 `绘制图标.png` 生成的 Q 版鲸鱼 adaptive icon，生成脚本为 `tools/make_icon.py`
 
 本机这份是开发态：目录联接 + `dsh.profile.bundles` 里写着 `"dsh-mobile-bridge"`，改 `host/` 里的代码立即生效。
@@ -116,7 +115,7 @@ dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.4.0
 
 MuMu 模拟器使用 NAT，宿主地址是 `10.0.2.2`；测试时填 `10.0.2.2:48123`。
 
-如果 DSH 跑在 VMware/VirtualBox 的 NAT 虚拟机里（例如虚拟机 IP 是 `192.168.x.x`），手机既连不上该地址，也收不到虚拟机的 UDP 广播。宿主机需要做两件事：
+如果 DSH 跑在 VMware/VirtualBox 的 NAT 虚拟机里（例如虚拟机 IP 在 `192.168.x.x` 网段），手机既连不上该地址，也收不到虚拟机的 UDP 广播。宿主机需要做两件事：
 
 ```powershell
 # 1) TCP：把宿主机 48125 转发到虚拟机的桥接端口
@@ -126,7 +125,7 @@ netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=48125 conn
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-discovery-relay.ps1
 ```
 
-`discovery-relay.json` 里填虚拟机的 `target`（`IP:48124`）、宿主机访问转发端口的 `httpUrl`、宿主机的 `publicHost`、转发端口 `publicPort`，以及可选的宿主机 Tailscale 地址 `tailscaleHost` 和显示名 `hostName`。中继监听 `48126/udp`，收到发现包后先查 `/api/discovery`；旧版桥接没有该接口时退回 `/health`，用配置里的显示名补一条应答。应答里的地址统一改写成宿主机地址（`publicHost:publicPort` 和 Tailscale 地址），所以手机看到的是可达的入口，而不是虚拟机的 `192.168.x.x`。App 同时扫描 `48124` 和 `48126`，局域网里的普通 DSH 和 NAT 虚拟机都能自动出现。防火墙需放行 `48126/udp`。更彻底的做法是把虚拟机网卡改成桥接，让虚拟机直接获得路由器网段地址。
+`discovery-relay.json` 里填虚拟机的 `target`（`IP:48124`）、宿主机访问转发端口的 `httpUrl`、宿主机的 `publicHost`、转发端口 `publicPort`，以及可选的宿主机 Tailscale 地址 `tailscaleHost` 和显示名 `hostName`。中继监听 `48126/udp`，收到发现包后先查 `/api/discovery`；旧版桥接没有该接口时退回 `/health`，用配置里的显示名补一条应答。应答里的地址统一改写成宿主机地址（`publicHost:publicPort` 和 Tailscale 地址），所以手机看到的是可达的入口，而不是虚拟机的 `192.168.x.x` 地址。App 同时扫描 `48124` 和 `48126`，局域网里的普通 DSH 和 NAT 虚拟机都能自动出现。防火墙需放行 `48126/udp`。更彻底的做法是把虚拟机网卡改成桥接，让虚拟机直接获得路由器网段地址。
 
 ## Tailscale 远程
 
@@ -214,10 +213,10 @@ Android App  ──HTTP/JSON + SSE──▶  http://<PC-IP>:48123  ──▶  DS
 ## 构建 Android
 
 ```powershell
-$env:JAVA_HOME='<repo-root>\.toolchain\jdk-17'
-$env:ANDROID_HOME='<repo-root>\.toolchain\android-sdk'
-$env:GRADLE_USER_HOME='<repo-root>\.toolchain\gradle-home'
-& '<repo-root>\.toolchain\gradle-8.9\bin\gradle.bat' `
+$env:JAVA_HOME='<toolchain>\jdk-17'
+$env:ANDROID_HOME='<toolchain>\android-sdk'
+$env:GRADLE_USER_HOME='<toolchain>\gradle-home'
+& '<toolchain>\gradle-8.9\bin\gradle.bat' `
   -p '<repo-root>\android' :app:assembleDebug --no-daemon
 ```
 
@@ -226,15 +225,15 @@ $env:GRADLE_USER_HOME='<repo-root>\.toolchain\gradle-home'
 如果 Kotlin 编译报 `AccessDeniedException` 且 `whoami /groups` 显示 `Low Mandatory Level`，说明 `.toolchain` 带了低完整性标签，执行一次：
 
 ```powershell
-icacls "<repo-root>\.toolchain" /setintegritylevel '(OI)(CI)High'
+icacls "<toolchain>" /setintegritylevel '(OI)(CI)High'
 ```
 
-安装到 MuMu：
+安装到 MuMu（把 MuMu 自带的 `adb.exe` 加进 PATH，或写它的完整路径）：
 
 ```powershell
-& 'adb' install -r `
+adb install -r `
   '<repo-root>\android\app\build\outputs\apk\debug\app-debug.apk'
-& 'adb' shell am start `
+adb shell am start `
   -n com.ts7.dshremote.debug/com.ts7.dshremote.MainActivity
 ```
 
@@ -248,9 +247,9 @@ npm test
 
 当前 27 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报。
 
-MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI 截图见 `docs/screenshots/50-light-connect.png`、`51-light-session.png`；Q 版图标见 `54-chibi-icon.png`；过滤后的任务列表见 `55-filtered-tasks.png`；DSH 侧栏控制面板见 `docs/screenshots/84-panel-live.png`。
+MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI、Q 版图标、过滤后的任务列表和 DSH 侧栏控制面板都实际跑过。
 
-DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧栏出现「手机远控」按钮，点击后弹出面板，能读取桥接状态、设备、配对码和设备列表；修复 `BRIDGE_PORT` 未定义后，按钮在面板关闭后仍保持存在，错误边界与 `dsh-app://app` CORS 生效。截图 `84-panel-live.png` 即真实 desktop 面板。
+DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧栏出现「手机远控」按钮，点击后弹出面板，能读取桥接状态、设备、配对码和设备列表；修复 `BRIDGE_PORT` 未定义后，按钮在面板关闭后仍保持存在，错误边界与 `dsh-app://app` CORS 生效。
 
 注意：PC 控制端已从网页改为 DSH client 插件，`host/lib/setup-page.js` 已删除。更新 `client.js` 后在 DSH 窗口按 F5 刷新页面即可加载；只有修改 host `server.js` 才需要完整重启 Electron。需要完整重启时可运行 `tools/restart-dsh.cmd`。
 
@@ -312,5 +311,4 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 - `dist/dsh-mobile-bridge-0.3.2.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
-- `docs/screenshots/`（MuMu 联调截图）
 - `README.md`

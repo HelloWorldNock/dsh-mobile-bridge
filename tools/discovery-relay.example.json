@@ -3,7 +3,7 @@
   "target": "203.0.113.20:48124",
   "httpUrl": "http://127.0.0.1:48125/api/discovery",
   "hostName": "vm-dsh",
-  "publicHost": "203.0.113.11",
+  "publicHost": "203.0.113.10",
   "publicPort": 48125,
   "tailscaleHost": "100.x.x.x"
 }

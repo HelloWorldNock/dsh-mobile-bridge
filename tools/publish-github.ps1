@@ -16,7 +16,7 @@ param(
   [string]$Owner = 'HelloWorldNock',
   [string]$Repo = 'dsh-mobile-bridge',
   [string]$Version = '0.1.0',
-  [string]$Proxy = 'http://127.0.0.1:7890'
+  [string]$Proxy = (if ($env:HTTPS_PROXY) { $env:HTTPS_PROXY } else { 'http://127.0.0.1:7890' })
 )
 
 $ErrorActionPreference = 'Stop'

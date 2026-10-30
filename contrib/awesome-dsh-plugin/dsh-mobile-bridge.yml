@@ -1,6 +1,6 @@
 # 商店条目：提交到 awesome-dsh-plugin 的目录
 #
-# 1. 把 HelloWorldNock / dsh-mobile-bridge 换成 GitHub 账号与仓库名（仓库根目录即本项目根目录，插件包在 host/ 子目录）。
+# 1. 把 <owner> / dsh-mobile-bridge 换成你的 GitHub 账号与仓库名（仓库根目录即本项目根目录，插件包在 host/ 子目录）。
 # 2. 在 https://github.com/awesome-dsh-plugin/awesome-dsh-plugin 里
 #    新建 data/plugins/<owner>__dsh-mobile-bridge.yml，内容复制本文件，发 PR。
 # 3. 给仓库打 dsh-plugin topic，并把 tools/pack-plugin.ps1 的产物传到 GitHub Release，

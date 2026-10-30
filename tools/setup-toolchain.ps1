@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$root = '<repo-root>'
+$root = Split-Path -Parent $PSScriptRoot
 $tc = Join-Path $root '.toolchain'
 $sdk = Join-Path $tc 'android-sdk'
 $log = Join-Path $root 'tools\setup-toolchain.log'

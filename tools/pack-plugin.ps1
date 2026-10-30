@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   打包 dsh-mobile-bridge 为可分发的 tgz，并校验清单。
 
@@ -9,7 +9,7 @@
 
 .EXAMPLE
   powershell -NoProfile -File tools/pack-plugin.ps1
-  powershell -NoProfile -File tools/pack-plugin.ps1 -Destination F:\tmp
+  powershell -NoProfile -File tools/pack-plugin.ps1 -Destination $env:TEMP
 #>
 [CmdletBinding()]
 param(
