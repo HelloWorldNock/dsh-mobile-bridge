@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   打包 dsh-mobile-bridge 为可分发的 tgz，并校验清单。
 

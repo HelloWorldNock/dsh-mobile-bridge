@@ -1,6 +1,6 @@
-# v0.4.0 — 内嵌 Tailscale 节点 / Embedded Tailscale node
+# v0.8.0 — 内嵌 Tailscale 节点 / Embedded Tailscale node
 
-电脑端插件现在自带一个 tailnet 节点（`tailscale.com/tsnet` userspace），这台机器不需要再装 Tailscale 客户端。
+电脑端插件现在自带一个 tailnet 节点（`tailscale.com/tsnet` userspace），这台机器不需要再装 Tailscale 客户端。手机端实测可连。
 
 ## 新增
 
@@ -14,14 +14,19 @@
 
 ## 附件
 
-- `dsh-mobile-bridge-0.4.0.tgz` — 插件包，已含 `bin/tsnode-windows-amd64.exe`
+- `dsh-mobile-bridge-0.8.0.tgz` — 插件包，已含 `bin/tsnode-windows-amd64.exe`
+- `TS7-DSH-Remote-0.8.0-debug.apk` — Android 客户端
 - `tsnode-windows-amd64.exe` — 内嵌节点程序，从源码安装或需要单独替换时用
-- `SHA256SUMS-0.4.0.txt`
+- `SHA256SUMS-0.8.0.txt`
+
+## 版本号规则
+
+从这个版本起插件与 App 用同一个版本号，GitHub Release 的 tag 与之一致：插件 `package.json`、`/api/info` 里的 `version`、APK 的 `versionName`、release tag 一律相同。此前插件（0.3.x/0.4.0）与 App（0.6.x/0.7.x）各自递增，导致 release 顺序看起来是倒的，这次统一掉。
 
 ## 安装
 
 ```
-dsh plugin --profile desktop add file:.<下载目录>\dsh-mobile-bridge-0.4.0.tgz
+dsh plugin --profile desktop add file:.<下载目录>\dsh-mobile-bridge-0.8.0.tgz
 ```
 
 从源码安装需要先重建节点程序（离线可跑，依赖已在 `.toolchain/go-home`）：
@@ -35,3 +40,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-tsnode.ps1 -Goos
 - 内嵌节点只有用户态网络栈，没有系统 TUN/DNS，所以不能让其他程序走它的网络；它只负责把 tailnet 上的 TCP 流量转发到本机 127.0.0.1 的 bridge 端口。
 - ACL 需要放行 48123/tcp；默认 tailnet 策略已允许同 tailnet 内互访。
 - 手机与电脑的内嵌节点都要在线；手机端内嵌节点由 App 自己管理。
+- `.tsnet-state` 里是这台机器的节点密钥：删掉就要重新登录，换机器时带上这个目录可以省一次登录。

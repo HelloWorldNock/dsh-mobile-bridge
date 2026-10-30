@@ -1,0 +1,12 @@
+# PowerShell 5.1 reads scripts with the system ANSI code page unless the file
+# starts with a UTF-8 BOM. Keep line endings and bytes untouched so the BOM
+# and CRLF survive every checkout.
+*.ps1 -text
+*.cmd -text
+*.bat -text
+
+*.png binary
+*.jpg binary
+*.exe binary
+*.aar binary
+*.tgz binary

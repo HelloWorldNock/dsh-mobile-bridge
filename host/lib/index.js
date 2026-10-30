@@ -10,7 +10,7 @@ import { createTailscale } from './tailscale.js'
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.4.0'
+const VERSION = '0.8.0'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,
