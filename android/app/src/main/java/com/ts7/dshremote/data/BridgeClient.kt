@@ -55,6 +55,21 @@ class BridgeClient(
         .apply { if (timeoutMs != null) callTimeout(timeoutMs, TimeUnit.MILLISECONDS) }
         .build()
 
+    /**
+     * The event stream outlives every RPC and must never inherit the RPC call
+     * timeout: a 15 s callTimeout used to cancel the SSE socket every 15 s. The
+     * read timeout is the liveness check instead — the host writes a heartbeat
+     * comment every 20 s, so 75 s of silence means the link is dead.
+     */
+    private val eventClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(75, TimeUnit.SECONDS)
+            .writeTimeout(20, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
+
     private val jsonType = "application/json; charset=utf-8".toMediaType()
     private val json = JsonConfig.json
 
@@ -204,7 +219,7 @@ class BridgeClient(
             .header("Authorization", "Bearer $token")
             .header("Accept", "text/event-stream")
             .build()
-        val call = client.newCall(request)
+        val call = eventClient.newCall(request)
         val worker = launch(Dispatchers.IO) {
             try {
                 call.execute().use { response ->

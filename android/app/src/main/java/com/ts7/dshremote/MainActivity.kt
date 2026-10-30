@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.ts7.dshremote.notify.Alerts
+import com.ts7.dshremote.notify.AppVisibility
 import com.ts7.dshremote.notify.BridgeService
 import com.ts7.dshremote.ui.AppRoot
 import com.ts7.dshremote.ui.theme.DshTheme
@@ -50,6 +51,23 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         consumeDeepLink(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.onStart()
+    }
+
+    override fun onStop() {
+        AppVisibility.onStop()
+        super.onStop()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // After a long screen-off period the chosen route may be dead; probing again
+        // beats waiting for the next network callback.
+        (application as DshApp).repository.reevaluateRoutes()
     }
 
     private fun consumeDeepLink(intent: Intent?) {

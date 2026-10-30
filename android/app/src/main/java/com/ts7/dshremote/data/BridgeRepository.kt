@@ -12,9 +12,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
@@ -28,6 +32,11 @@ class BridgeRepository(
     context: Context,
     val tailscale: EmbeddedTailscale = EmbeddedTailscale(context.applicationContext)
 ) {
+    companion object {
+        /** 会话目录兜底工作区的 id 前缀；创建任务时拆出来走 cwd 参数。 */
+        const val CWD_PREFIX = "cwd:"
+    }
+
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences(HostStore.PREFS, Context.MODE_PRIVATE)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -41,6 +50,13 @@ class BridgeRepository(
     private val _pendingHosts = MutableStateFlow<List<HostPending>>(emptyList())
     val pendingHosts: StateFlow<List<HostPending>> = _pendingHosts.asStateFlow()
 
+    /** Turn-finished / turn-failed notices pushed by the host, for the foreground service. */
+    private val _turnNotices = MutableSharedFlow<TurnNotice>(
+        extraBufferCapacity = 32,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
+    val turnNotices: SharedFlow<TurnNotice> = _turnNotices.asSharedFlow()
+
     private class Runtime(var profile: PairedHost) {
         var connection: ConnectionState = ConnectionState.Disconnected
         var endpointKind: String? = null
@@ -52,6 +68,8 @@ class BridgeRepository(
         var pending: PendingState = PendingState()
         var workspaces: List<Workspace> = emptyList()
         var presets: PresetCatalog = PresetCatalog()
+        var catalogLoading: Boolean = false
+        var catalogError: String? = null
         var activeSessionId: String? = null
         var pendingOpenSessionId: String? = null
         var detail: SessionDetail? = null
@@ -61,6 +79,7 @@ class BridgeRepository(
         var error: String? = null
         var notice: String? = null
         var assistantTexts: MutableMap<String, String> = mutableMapOf()
+        var eventFailures: Int = 0
 
         val pendingCount: Int get() = pending.approvals.size + pending.questions.size
         val label: String
@@ -238,10 +257,14 @@ class BridgeRepository(
         sync()
     }
 
-    fun refreshCatalog() {
-        val runtime = activeRuntime() ?: return
+    private fun refreshCatalogInternal(runtime: Runtime) {
         refreshWorkspaces(runtime)
         refreshPresets(runtime)
+    }
+
+    fun refreshCatalog() {
+        val runtime = activeRuntime() ?: return
+        refreshCatalogInternal(runtime)
     }
 
     suspend fun pair(
@@ -372,6 +395,21 @@ class BridgeRepository(
                 runtime.pending = pending
                 sync()
             }
+        }
+    }
+
+    /**
+     * Cheap reconciliation used by the foreground service with the screen off:
+     * a lost SSE frame leaves running flags or the pending queue stale, and only
+     * the host knows the truth. Pending is included on every pass because an
+     * approval that goes unnoticed simply times out on the desktop.
+     */
+    fun reconcile() {
+        if (!started) return
+        for (runtime in runtimes.values.toList()) {
+            if (runtime.connection != ConnectionState.Connected) continue
+            refreshSessions(runtime.profile.id)
+            refreshPending(runtime.profile.id)
         }
     }
 
@@ -616,6 +654,7 @@ class BridgeRepository(
         val next = opened.client
         val info = opened.info
         runtime.client = next
+        runtime.eventFailures = 0
         runtime.info = info
         runtime.connection = ConnectionState.Connected
         runtime.endpointKind = opened.endpoint.kind
@@ -663,14 +702,30 @@ class BridgeRepository(
                     failure = error
                 }
                 if (!isActive) break
+                if (failure is ApiException && failure.status == 401) {
+                    runtime.connection = ConnectionState.Error
+                    runtime.error = failure.message
+                    sync()
+                    break
+                }
+                runtime.eventFailures += 1
+                // Dropped streams are routine on mobile networks (NAT rebinding,
+                // screen-off power saving). Retry the same endpoint twice before
+                // paying for a full LAN/Tailscale route probe, so a single blip
+                // does not flash the UI to "连接中" or fire connection alerts.
+                if (runtime.eventFailures <= 2) {
+                    delay(1_000)
+                    continue
+                }
                 // The route may have changed (Wi-Fi -> cellular). Do not retry the
                 // stale client forever: probe LAN/Tailscale again and reconnect.
                 runtime.connection = ConnectionState.Connecting
                 runtime.error = failure?.message?.takeIf { it.isNotBlank() }
                 runtime.client = null
                 sync()
+                val wait = minOf(30_000L, 2_000L * (1 shl minOf(runtime.eventFailures - 3, 4)))
                 scope.launch {
-                    delay(1_500)
+                    delay(wait)
                     if (runtimes[runtime.profile.id] === runtime) restart(runtime)
                 }
                 return@launch
@@ -726,14 +781,34 @@ class BridgeRepository(
 
     private fun refreshWorkspaces(runtime: Runtime) {
         val client = runtime.client ?: return
+        runtime.catalogLoading = true
+        runtime.catalogError = null
+        sync()
         scope.launch {
-            runCatching { client.workspaces() }.onSuccess { workspaces ->
-                if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
-                runtime.workspaces = workspaces
-                sync()
-            }
+            val result = runCatching { client.workspaces() }
+            if (runtimes[runtime.profile.id] !== runtime) return@launch
+            result
+                .onSuccess { workspaces ->
+                    // 桌面端没有登记工作区时，用已知会话的目录兜底，
+                    // 避免任务页一行都选不了。
+                    runtime.workspaces = workspaces.ifEmpty { workspacesFromSessions(runtime.sessions) }
+                    runtime.catalogError = null
+                }
+                .onFailure { error ->
+                    runtime.workspaces = workspacesFromSessions(runtime.sessions)
+                    runtime.catalogError = error.message?.takeIf { it.isNotBlank() } ?: "无法读取桌面端工作区"
+                }
+            runtime.catalogLoading = false
+            sync()
         }
     }
+
+    /** 用会话目录拼出可选工作区，id 带 [CWD_PREFIX] 前缀，创建任务时改为直接传 cwd。 */
+    private fun workspacesFromSessions(sessions: List<SessionSummary>): List<Workspace> =
+        sessions
+            .mapNotNull { it.cwd?.takeIf { cwd -> cwd.isNotBlank() } }
+            .distinct()
+            .map { cwd -> Workspace(id = CWD_PREFIX + cwd, path = cwd) }
 
     private fun refreshPresets(runtime: Runtime) {
         val client = runtime.client ?: return
@@ -750,9 +825,18 @@ class BridgeRepository(
         try {
             when (event.name) {
                 "hello" -> {
+                    val recovered = runtime.eventFailures > 0
                     runtime.connection = ConnectionState.Connected
                     runtime.error = null
+                    runtime.eventFailures = 0
                     sync()
+                    // A re-attached stream may have missed status frames, so pull
+                    // the authoritative running flags and pending queue once.
+                    if (recovered) {
+                        refreshSessions(runtime.profile.id)
+                        refreshPending(runtime.profile.id)
+                        if (runtime.workspaces.isEmpty()) refreshCatalogInternal(runtime)
+                    }
                 }
                 "session.snapshot" -> {
                     val envelope = JsonConfig.json.decodeFromString(SnapshotEnvelope.serializer(), event.data)
@@ -767,7 +851,18 @@ class BridgeRepository(
                 "session.event" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionEventEnvelope.serializer(), event.data)
                     val item = envelope.item ?: return
-                    if (runtime.activeSessionId != envelope.sessionId) return
+                    // Record assistant text for every followed session, not only the
+                    // open one: the foreground service needs it for completion
+                    // notifications while the phone is locked.
+                    if (item.kind == "assistant") {
+                        item.text?.takeIf { it.isNotBlank() }?.let {
+                            runtime.assistantTexts[envelope.sessionId] = it.take(4_000)
+                        }
+                    }
+                    if (runtime.activeSessionId != envelope.sessionId) {
+                        sync()
+                        return
+                    }
                     val timeline = if (timelineContains(runtime.timeline, item.seq)) {
                         runtime.timeline
                     } else {
@@ -777,11 +872,6 @@ class BridgeRepository(
                         item.kind == "turn" && item.phase == "start" -> true
                         item.kind == "turn" && item.phase == "end" -> false
                         else -> runtime.detail?.session?.running ?: false
-                    }
-                    if (item.kind == "assistant") {
-                        item.text?.takeIf { it.isNotBlank() }?.let {
-                            runtime.assistantTexts[envelope.sessionId] = it.take(4_000)
-                        }
                     }
                     runtime.timeline = timeline
                     runtime.detail = runtime.detail?.let { detail ->
@@ -876,6 +966,30 @@ class BridgeRepository(
                     val envelope = JsonConfig.json.decodeFromString(ClosedEnvelope.serializer(), event.data)
                     removeQuestion(runtime, envelope.id)
                 }
+                "notice" -> {
+                    val envelope = JsonConfig.json.decodeFromString(NoticeEnvelope.serializer(), event.data)
+                    val sessionId = envelope.sessionId ?: return
+                    val kind = envelope.kind ?: return
+                    if (kind != "turn-end" && kind != "turn-error") return
+                    if (kind == "turn-end") {
+                        envelope.text?.takeIf { it.isNotBlank() }?.let {
+                            runtime.assistantTexts[sessionId] = it.take(4_000)
+                        }
+                    }
+                    _turnNotices.tryEmit(
+                        TurnNotice(
+                            hostId = runtime.profile.id,
+                            hostLabel = runtime.label,
+                            kind = kind,
+                            sessionId = sessionId,
+                            title = envelope.title.orEmpty(),
+                            text = envelope.text.orEmpty(),
+                            reason = envelope.reason,
+                            durationMs = envelope.durationMs
+                        )
+                    )
+                    sync()
+                }
             }
         } catch (_: Throwable) {
             // Ignore unknown or malformed events; the stream keeps running.
@@ -951,6 +1065,8 @@ class BridgeRepository(
             pending = active?.pending ?: PendingState(),
             workspaces = active?.workspaces.orEmpty(),
             presets = active?.presets ?: PresetCatalog(),
+            catalogLoading = active?.catalogLoading ?: false,
+            catalogError = active?.catalogError,
             busy = active?.busy ?: false,
             error = active?.error,
             notice = active?.notice,

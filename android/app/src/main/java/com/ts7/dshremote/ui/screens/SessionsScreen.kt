@@ -92,9 +92,10 @@ fun SessionsScreen(
     onSelectHost: (String) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
-    var collapsedKey by rememberSaveable(state.activeHost?.id ?: "none") { mutableStateOf("") }
-    val collapsed = remember(collapsedKey) {
-        collapsedKey.split('\u0001').filter { it.isNotEmpty() }.toSet()
+    // 手机屏小，工作区默认一律收起；只记录用户手动展开的组，搜索时全部临时展开。
+    // 按主机区分，换主机不串状态；Activity 重建时保留用户这次展到哪。
+    var expanded by rememberSaveable(state.activeHost?.id ?: "none") {
+        mutableStateOf(emptySet<String>())
     }
     LaunchedEffect(Unit) {
         repository.refreshSessions()
@@ -119,8 +120,7 @@ fun SessionsScreen(
     }
 
     fun toggle(id: String) {
-        val next = if (id in collapsed) collapsed - id else collapsed + id
-        collapsedKey = next.joinToString("\u0001")
+        expanded = if (id in expanded) expanded - id else expanded + id
     }
 
     Box(Modifier.fillMaxSize().background(Ink)) {
@@ -223,7 +223,7 @@ fun SessionsScreen(
             } else {
                 item { SectionLabel("工作区", "${groups.size}") }
                 groups.forEach { group ->
-                    val expanded = query.isNotBlank() || group.id !in collapsed
+                    val expanded = query.isNotBlank() || group.id in expanded
                     item(key = "workspace-${group.id}") {
                         WorkspaceHeader(group, expanded) { toggle(group.id) }
                     }

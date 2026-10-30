@@ -1,5 +1,7 @@
 package com.ts7.dshremote.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -33,22 +35,32 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
+import com.ts7.dshremote.BuildConfig
 import com.ts7.dshremote.data.AppState
 import com.ts7.dshremote.data.ConnectionState
 import com.ts7.dshremote.data.EmbeddedTailscale
 import com.ts7.dshremote.data.Endpoints
 import com.ts7.dshremote.data.HostSummary
+import com.ts7.dshremote.notify.Alerts
+import com.ts7.dshremote.notify.KeepAlive
+import com.ts7.dshremote.notify.Reliability
 import com.ts7.dshremote.ui.ConnectionPill
 import com.ts7.dshremote.ui.SectionLabel
 import com.ts7.dshremote.ui.StatusDot
@@ -280,8 +292,94 @@ fun SettingsScreen(
                 }
                 InfoRow("节点名", ts.hostname.ifBlank { "—" })
 
+                SectionLabel("后台与通知")
+                var notificationsOk by remember { mutableStateOf(Reliability.notificationsGranted(context)) }
+                var batteryOk by remember { mutableStateOf(Reliability.batteryExempt(context)) }
+                var keepAliveOn by remember { mutableStateOf(KeepAlive.enabled(context)) }
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestPermission()
+                ) { notificationsOk = Reliability.notificationsGranted(context) }
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            notificationsOk = Reliability.notificationsGranted(context)
+                            batteryOk = Reliability.batteryExempt(context)
+                            keepAliveOn = KeepAlive.enabled(context)
+                        }
+                    }
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                }
+
+                SettingRow(
+                    title = "通知权限",
+                    detail = if (notificationsOk) "已允许，审批与任务结束会提醒" else "未允许，锁屏时收不到任何提醒",
+                    detailColor = if (notificationsOk) TextMuted else Danger
+                ) {
+                    if (!notificationsOk) {
+                        TextButton(onClick = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) {
+                            Text("去允许", color = Amber)
+                        }
+                    }
+                }
+                SettingRow(
+                    title = "电池优化豁免",
+                    detail = if (batteryOk) "已豁免，息屏后连接更稳" else "未豁免，深度休眠时连接可能被系统挂起",
+                    detailColor = if (batteryOk) TextMuted else Danger
+                ) {
+                    if (!batteryOk) {
+                        TextButton(onClick = { Reliability.openBatterySettings(context) }) {
+                            Text("去设置", color = Amber)
+                        }
+                    }
+                }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(SurfaceRaised, RoundedCornerShape(18.dp))
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("息屏保持连接", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+                        Text(
+                            "屏幕熄灭时持有唤醒锁，保持事件流不断开；会略微增加耗电",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted
+                        )
+                    }
+                    Switch(
+                        checked = keepAliveOn,
+                        onCheckedChange = {
+                            keepAliveOn = it
+                            KeepAlive.setEnabled(context, it)
+                        }
+                    )
+                }
+                TextButton(onClick = { Alerts.test(context) }) {
+                    Text("发送测试通知", color = Amber)
+                }
+                Text(
+                    "任务结束或需要你审批、回答时会发通知；点通知直接回到对应任务。前台服务常驻通知栏是 Android 的硬性要求，可折叠但无法完全隐藏。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+                Reliability.oemHint()?.let { hint ->
+                    Text(
+                        hint,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Amber,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
+
                 SectionLabel("关于")
-                Text("TS7 DSH Remote 0.5.0", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                Text(
+                    "TS7 DSH Remote ${BuildConfig.VERSION_NAME}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextPrimary
+                )
                 Text(
                     "Android 客户端 · 通过局域网同时连接多台 DeepSeek Harness 主机",
                     style = MaterialTheme.typography.bodySmall,
@@ -471,5 +569,27 @@ private fun InfoRow(label: String, value: String) {
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, color = TextMuted)
         Text(value, style = MonoText, color = TextPrimary)
+    }
+}
+
+@Composable
+private fun SettingRow(
+    title: String,
+    detail: String,
+    detailColor: Color,
+    action: @Composable () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(SurfaceRaised, RoundedCornerShape(18.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = detailColor)
+        }
+        action()
     }
 }

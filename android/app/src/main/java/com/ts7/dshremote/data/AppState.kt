@@ -54,6 +54,8 @@ data class AppState(
     val pending: PendingState = PendingState(),
     val workspaces: List<Workspace> = emptyList(),
     val presets: PresetCatalog = PresetCatalog(),
+    val catalogLoading: Boolean = false,
+    val catalogError: String? = null,
     val busy: Boolean = false,
     val error: String? = null,
     val notice: String? = null,

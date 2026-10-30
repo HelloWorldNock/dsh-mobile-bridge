@@ -56,6 +56,32 @@ data class SessionIdEnvelope(
 )
 
 @Serializable
+data class NoticeEnvelope(
+    val kind: String? = null,
+    val sessionId: String? = null,
+    val title: String? = null,
+    val text: String? = null,
+    val durationMs: Long? = null,
+    val reason: String? = null
+)
+
+/**
+ * A notice the host pushed on its own initiative (turn finished or failed).
+ * These arrive even when the phone has not opened the session, so the service
+ * can notify without polling.
+ */
+data class TurnNotice(
+    val hostId: String,
+    val hostLabel: String,
+    val kind: String,
+    val sessionId: String,
+    val title: String,
+    val text: String,
+    val reason: String? = null,
+    val durationMs: Long? = null
+)
+
+@Serializable
 data class HelloEnvelope(
     val deviceId: String? = null,
     val hostName: String? = null,

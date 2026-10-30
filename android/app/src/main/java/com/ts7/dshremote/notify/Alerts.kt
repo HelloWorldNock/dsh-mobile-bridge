@@ -129,6 +129,41 @@ object Alerts {
         notify(context, ("turn:" + hostId + ":" + sessionId).hashCode() and 0x7fffffff, notification)
     }
 
+    fun turnFailed(
+        context: Context,
+        hostId: String,
+        hostLabel: String,
+        sessionId: String,
+        title: String,
+        text: String
+    ) {
+        val body = text.replace(Regex("\\s+"), " ").trim().take(160).ifBlank { "任务被中断，请回到应用查看" }
+        val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("任务异常 · ${title.ifBlank { hostLabel }}")
+            .setContentText(body)
+            .setSubText(hostLabel)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(openIntent(context, hostId, sessionId, null, 5))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .build()
+        notify(context, ("turn:" + hostId + ":" + sessionId).hashCode() and 0x7fffffff, notification)
+    }
+
+    /** Confirms the alert channel actually reaches the lock screen. */
+    fun test(context: Context) {
+        val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("测试通知")
+            .setContentText("息屏与后台通知已就绪")
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setContentIntent(openIntent(context, null, null, null, 7))
+            .setAutoCancel(true)
+            .build()
+        notify(context, "test".hashCode() and 0x7fffffff, notification)
+    }
+
     fun connectionLost(context: Context, hostLabel: String) {
         val notification = NotificationCompat.Builder(context, CHANNEL_CONNECTION)
             .setSmallIcon(R.drawable.ic_notification)

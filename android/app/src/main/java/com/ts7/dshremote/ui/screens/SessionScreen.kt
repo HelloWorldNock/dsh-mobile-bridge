@@ -2,6 +2,8 @@ package com.ts7.dshremote.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowUpward
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PendingActions
 import androidx.compose.material.icons.outlined.Terminal
@@ -54,12 +58,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ts7.dshremote.data.AppState
 import com.ts7.dshremote.data.BridgeRepository
+import com.ts7.dshremote.data.SessionPrefs
 import com.ts7.dshremote.data.TimelineItem
 import com.ts7.dshremote.ui.ApprovalCard
 import com.ts7.dshremote.ui.QuestionCard
@@ -78,6 +84,12 @@ import kotlinx.coroutines.launch
 
 private enum class SessionDialog { Rename, Permission, Plan, Stop, Delete }
 
+/**
+ * 贴底时额外滚动的像素量。简洁模式把大段工具调用压成一行，只滚到最后一项会把它
+ * 顶到屏幕最上沿；补一屏高度后列表会自己夹到末尾，内容就贴底了。
+ */
+private const val SessionScrollTailPx = 2000f
+
 @Composable
 fun SessionScreen(
     repository: BridgeRepository,
@@ -87,8 +99,12 @@ fun SessionScreen(
 ) {
     val session = state.activeSession
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val listState = rememberLazyListState()
     var menuOpen by remember { mutableStateOf(false) }
+    var showDetails by remember { mutableStateOf(SessionPrefs.showDetails(context)) }
+    var expandedGroups by remember(session?.id) { mutableStateOf(emptySet<Long>()) }
+    val rows = remember(state.timeline, showDetails) { buildTimelineRows(state.timeline, showDetails) }
     var dialog by remember { mutableStateOf<SessionDialog?>(null) }
     var input by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("queue") }
@@ -110,9 +126,16 @@ fun SessionScreen(
     val approval = state.pending.approvals.firstOrNull { it.sessionId == null || it.sessionId == state.activeSessionId }
     val question = state.pending.questions.firstOrNull { it.sessionId == null || it.sessionId == state.activeSessionId }
 
-    LaunchedEffect(state.timeline.size, state.streamText.length) {
-        val last = state.timeline.size - 1
-        if (last >= 0) runCatching { listState.animateScrollToItem(last) }
+    LaunchedEffect(state.timeline.size, state.streamText.length, showDetails) {
+        val last = rows.lastIndex
+        if (last >= 0) {
+            // 简洁模式把大段工具调用压成一行，只滚到“最后一项”会把它顶到屏幕最上沿、
+            // 下面空一大片；补一屏的滚动量，让内容贴底。
+            runCatching {
+                listState.scrollToItem(last)
+                listState.scrollBy(SessionScrollTailPx)
+            }
+        }
     }
 
     Surface(color = Ink, modifier = Modifier.fillMaxSize()) {
@@ -163,6 +186,14 @@ fun SessionScreen(
                         DropdownMenuItem(text = { Text("重命名") }, onClick = { menuOpen = false; dialog = SessionDialog.Rename })
                         DropdownMenuItem(text = { Text("权限预设") }, onClick = { menuOpen = false; dialog = SessionDialog.Permission })
                         DropdownMenuItem(text = { Text("计划模式") }, onClick = { menuOpen = false; dialog = SessionDialog.Plan })
+                        DropdownMenuItem(
+                            text = { Text(if (showDetails) "隐藏执行细节" else "显示执行细节") },
+                            onClick = {
+                                menuOpen = false
+                                showDetails = !showDetails
+                                SessionPrefs.setShowDetails(context, showDetails)
+                            }
+                        )
                         DropdownMenuItem(text = { Text("停止任务", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Stop })
                         DropdownMenuItem(text = { Text("彻底删除", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Delete })
                     }
@@ -186,8 +217,20 @@ fun SessionScreen(
                         )
                     }
                 }
-                items(state.timeline) { item ->
-                    TimelineRow(item)
+                items(rows) { row ->
+                    when (row) {
+                        is TimelineRowModel.Single -> TimelineRow(row.item)
+                        is TimelineRowModel.Tools -> {
+                            val key = row.items.firstOrNull()?.seq ?: row.items.first().hashCode().toLong()
+                            ToolGroupRow(
+                                items = row.items,
+                                expanded = key in expandedGroups,
+                                onToggle = {
+                                    expandedGroups = if (key in expandedGroups) expandedGroups - key else expandedGroups + key
+                                }
+                            )
+                        }
+                    }
                 }
                 if (state.streamText.isNotBlank()) {
                     item {
@@ -416,6 +459,90 @@ fun SessionScreen(
             textContentColor = TextMuted
         )
         null -> Unit
+    }
+}
+
+/** 简洁模式把相邻的工具调用/结果合并成一行摘要，其余消息原样展示。 */
+private sealed interface TimelineRowModel {
+    data class Single(val item: TimelineItem) : TimelineRowModel
+    data class Tools(val items: List<TimelineItem>) : TimelineRowModel
+}
+
+private fun buildTimelineRows(timeline: List<TimelineItem>, showDetails: Boolean): List<TimelineRowModel> {
+    if (showDetails) return timeline.map { TimelineRowModel.Single(it) }
+    val rows = mutableListOf<TimelineRowModel>()
+    val tools = mutableListOf<TimelineItem>()
+    fun flush() {
+        if (tools.isEmpty()) return
+        rows += TimelineRowModel.Tools(tools.toList())
+        tools.clear()
+    }
+    timeline.forEach { item ->
+        if (item.kind == "tool-call" || item.kind == "tool-result") {
+            tools += item
+        } else {
+            flush()
+            rows += TimelineRowModel.Single(item)
+        }
+    }
+    flush()
+    return rows
+}
+
+@Composable
+private fun ToolGroupRow(items: List<TimelineItem>, expanded: Boolean, onToggle: () -> Unit) {
+    val calls = items.filter { it.kind == "tool-call" }
+    val error = items.firstOrNull { it.kind == "tool-result" && it.isError }
+    val names = calls.mapNotNull { it.name?.takeIf { name -> name.isNotBlank() } }.distinct()
+    val summary = buildString {
+        append("执行 ")
+        append(if (calls.isEmpty()) "工具" else "${calls.size} 步")
+        if (names.isNotEmpty()) {
+            append(" · ")
+            append(names.take(3).joinToString(", "))
+            if (names.size > 3) append(" 等")
+        }
+    }
+    val errorText = error?.let { it.reason ?: it.text }?.takeIf { it.isNotBlank() }?.take(200)
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(Color(0xFFF3F6F4), RoundedCornerShape(12.dp))
+                .border(1.dp, if (error != null) Danger.copy(alpha = 0.5f) else Outline, RoundedCornerShape(12.dp))
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Outlined.Terminal,
+                contentDescription = null,
+                tint = if (error != null) Danger else Amber,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(summary, style = MaterialTheme.typography.labelMedium, color = TextMuted, maxLines = 1)
+                if (errorText != null) {
+                    Text(
+                        errorText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Danger,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Icon(
+                if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                contentDescription = if (expanded) "收起细节" else "展开细节",
+                tint = TextMuted,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        if (expanded) {
+            items.forEach { TimelineRow(it) }
+        }
     }
 }
 

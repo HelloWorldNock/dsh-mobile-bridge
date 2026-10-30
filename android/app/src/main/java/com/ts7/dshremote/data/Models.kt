@@ -1,7 +1,47 @@
 package com.ts7.dshremote.data
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonPrimitive
+import java.time.Instant
+
+/**
+ * 桌面端的时间字段可能是毫秒数，也可能是 ISO 字符串（工作区记录就是后者）。
+ * 两种都能解析，解析失败时返回 null，避免一个字段把整段列表打挂。
+ */
+object EpochMillisSerializer : KSerializer<Long?> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("EpochMillis", PrimitiveKind.LONG)
+
+    override fun deserialize(decoder: Decoder): Long? {
+        if (decoder !is JsonDecoder) return null
+        return when (val element = decoder.decodeJsonElement()) {
+            is JsonPrimitive -> when {
+                element.isString -> parseInstant(element.content)
+                !element.isString -> element.content.toDoubleOrNull()?.toLong()
+                else -> null
+            }
+            else -> null
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: Long?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeLong(value)
+    }
+
+    private fun parseInstant(raw: String): Long? {
+        val text = raw.trim()
+        if (text.isEmpty()) return null
+        text.toDoubleOrNull()?.let { return it.toLong() }
+        return runCatching { Instant.parse(text).toEpochMilli() }.getOrNull()
+    }
+}
 
 @Serializable
 data class PlanState(
@@ -14,7 +54,7 @@ data class SessionSummary(
     val id: String,
     val title: String? = null,
     val cwd: String? = null,
-    val updatedAt: Long? = null,
+    @Serializable(with = EpochMillisSerializer::class) val updatedAt: Long? = null,
     val running: Boolean = false,
     val blank: Boolean = false,
     val agentAvailable: Boolean = false,
@@ -130,7 +170,7 @@ data class Workspace(
     val id: String,
     val path: String = "",
     val title: String? = null,
-    val updatedAt: Long? = null,
+    @Serializable(with = EpochMillisSerializer::class) val updatedAt: Long? = null,
     val sessionIds: List<String> = emptyList()
 )
 

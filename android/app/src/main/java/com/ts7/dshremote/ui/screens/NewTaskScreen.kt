@@ -81,7 +81,9 @@ fun NewTaskScreen(
     LaunchedEffect(Unit) { repository.refreshCatalog() }
 
     LaunchedEffect(state.workspaces) {
-        if (workspaceId == null) workspaceId = state.workspaces.firstOrNull()?.id
+        if (workspaceId == null || state.workspaces.none { it.id == workspaceId }) {
+            workspaceId = state.workspaces.firstOrNull()?.id
+        }
     }
 
     val presets = state.presets.options.ifEmpty {
@@ -114,7 +116,22 @@ fun NewTaskScreen(
 
             SectionLabel("工作区")
             if (state.workspaces.isEmpty()) {
-                Text("没有可用工作区，请先在电脑端打开一个目录。", style = MaterialTheme.typography.bodyMedium, color = TextMuted)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (state.catalogLoading) "正在同步桌面端工作区…" else "没有可用工作区，请先在电脑端打开一个目录。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextMuted,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        "重试",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Amber,
+                        modifier = Modifier
+                            .clickable { repository.refreshCatalog() }
+                            .padding(8.dp)
+                    )
+                }
             } else {
                 state.workspaces.forEach { workspace ->
                     val selected = workspace.id == workspaceId
@@ -138,6 +155,27 @@ fun NewTaskScreen(
                             )
                             Text(workspace.path, style = MonoText, color = TextMuted, maxLines = 1)
                         }
+                    }
+                }
+                state.catalogError?.let { message ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "桌面端工作区同步失败，已改为列出最近会话的目录（$message）",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Danger,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            "重试",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Amber,
+                            modifier = Modifier
+                                .clickable { repository.refreshCatalog() }
+                                .padding(8.dp)
+                        )
                     }
                 }
             }
@@ -255,7 +293,9 @@ fun NewTaskScreen(
                     scope.launch {
                         creating = true
                         error = null
-                        repository.createSession(target, null, prompt, plan, permission, images)
+                        val cwd = target.removePrefix(BridgeRepository.CWD_PREFIX)
+                            .takeIf { target.startsWith(BridgeRepository.CWD_PREFIX) }
+                        repository.createSession(if (cwd == null) target else null, cwd, prompt, plan, permission, images)
                             .onSuccess { id -> onCreated(id) }
                             .onFailure { failure -> error = failure.message ?: "创建失败" }
                         creating = false
