@@ -88,7 +88,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.8.0.tgz（约 8.9 MB / 23 个文件，含 bin/tsnode-windows-amd64.exe）
+# → dist/dsh-mobile-bridge-0.8.1.tgz（约 8.9 MB / 23 个文件，含 bin/tsnode-windows-amd64.exe）
 ```
 
 包体积变大是因为从 0.8.0 起插件自带内嵌 Tailscale 节点程序；节点程序缺失时脚本只警告并提示先跑 `tools/build-tsnode.ps1`，但打包清单里缺它会直接失败。插件、APK 与 GitHub Release tag 现在用同一个版本号。
@@ -96,18 +96,18 @@ powershell -NoProfile -File tools/pack-plugin.ps1
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.0.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.1.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
 
-分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.0.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
+分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.1.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.7.2-debug.apk`。
+1. 安装 `dist/TS7-DSH-Remote-0.8.1-debug.apk`。
 2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
-3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`）。
+3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`，并打开表单下方的「通过 Tailscale 连接」开关）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
 5. 配对成功后 token 保存在本机，后续自动重连；局域网和 Tailscale 两条线路会自动选择，无需手动切换。
 6. 需要更多主机时，在 App 顶部的「主机 +」或 设置 → 添加另一台主机，重复 2–5。每台主机独立保存 token、任务和审批；同一台电脑运行多个 DSH 实例时，需要给各自的桥接插件配置不同端口。App 按「设备 ID + 端口」区分主机，共用状态文件的多个实例也能分别保留。
@@ -137,6 +137,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-discovery-rela
 - 同一台电脑的多个端点必须指向同一个桥接实例。换机或重装导致设备 ID 变化时，App 会拒绝该端点，避免把任务发到另一台 DSH。
 - 电脑端有两种方式加入 tailnet：装系统 Tailscale 并自己登录（桥接只读取它的地址），或者在手机远控面板里打开「内置 Tailscale 节点」（见下节），后者不需要安装任何东西。
 - 如果 DSH 在 NAT 虚拟机里、Tailscale 只装在宿主机：在 设置 → 当前主机 → 添加备用地址，填 `宿主机TailscaleIP:转发端口`（例如 `100.x.x.x:48125`）。App 会把这条地址和局域网地址一起保存并自动选路；更彻底的做法是在虚拟机内也登录 Tailscale，或在宿主机上开内置节点并把 48123 转发进虚拟机。
+- 手动添加主机时，表单下方有「通过 Tailscale 连接」开关。关闭时按填写的地址直连（局域网）；打开时先经 App 内嵌节点把流量送进 tailnet，再向该地址发起配对——填 `100.x` 地址、MagicDNS 名，或电脑在 NAT 虚拟机里只有 `192.168.x.x` 虚拟网段地址时用它。填 `100.x` 地址且内嵌节点已启用时开关自动打开，手动关掉后不再自动改回。配对走回环代理，但保存的仍是真实地址，之后的自动选路不受影响，并且这条地址在探测顺序里排到最前——这个顺序会写进配对档案，重连时不再先去试一台连不上的局域网地址。
 - App 有两种远程方式，任选其一：安装系统 Tailscale 并开启 VPN；或在 设置 → 远程访问 → 内嵌 TAILSCALE 打开「随 App 启动」，按提示完成一次 tailnet 登录。内嵌节点是 userspace 实现，只有一个回环代理，不接管系统网络，因此不会和系统 Tailscale 或其他 VPN 冲突，但其他 App 也不会因此获得 tailnet 访问。
 - 内嵌模式和系统模式可以同时存在：选路时局域网优先；局域网不可达时，内嵌节点已连接就走内嵌代理，否则仍可走系统 VPN 的直连地址。切换开关或完成登录后，App 会主动重连并重新选路，不需要手动改地址。
 
@@ -307,8 +308,8 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.8.0-debug.apk`
-- `dist/dsh-mobile-bridge-0.8.0.tgz`
+- `dist/TS7-DSH-Remote-0.8.1-debug.apk`
+- `dist/dsh-mobile-bridge-0.8.1.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `README.md`

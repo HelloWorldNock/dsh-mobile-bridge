@@ -198,17 +198,51 @@ class BridgeRepository(
      */
     private fun clientFor(endpoint: BridgeEndpoint, token: String, timeoutMs: Long): BridgeClient {
         if (endpoint.kind == Endpoints.TAILSCALE && tailscale.state.value.enabled) {
-            val host = runCatching { java.net.URI(endpoint.url).host }.getOrNull()
-                ?.trim('[', ']')
-                ?: error("Tailscale 地址无效")
-            val port = runCatching { java.net.URI(endpoint.url).port }.getOrNull()
-                ?.takeIf { it in 1..65535 }
-                ?: 80
+            val (host, port) = Endpoints.target(endpoint.url) ?: error("Tailscale 地址无效")
             val local = tailscale.proxyFor(host, port)
                 ?: throw IOException("内嵌 Tailscale 正在连接")
             return BridgeClient("http://127.0.0.1:$local", token, timeoutMs)
         }
         return BridgeClient(endpoint.url, token, timeoutMs)
+    }
+
+    /**
+     * Resolve a tailnet target to the embedded node's loopback proxy.
+     *
+     * The embedded node is a userspace tailnet: it never installs a VPN route,
+     * so dialing a 100.x address directly leaves on the Wi-Fi interface and
+     * times out. Pairing has to take this same hop as every later RPC.
+     */
+    private fun tailnetDialUrl(rawUrl: String): String {
+        val state = tailscale.state.value
+        if (!state.enabled) {
+            throw IOException("内嵌 Tailscale 未启用：先到 设置 → 内嵌 Tailscale 打开，再配对")
+        }
+        if (state.phase != EmbeddedTailscale.Phase.Connected) {
+            throw IOException(
+                when (state.phase) {
+                    EmbeddedTailscale.Phase.Starting -> "内嵌 Tailscale 正在连接，请稍候重试"
+                    EmbeddedTailscale.Phase.NeedsLogin -> "内嵌 Tailscale 需要登录 tailnet，请到设置里完成登录"
+                    EmbeddedTailscale.Phase.Error -> state.error?.takeIf { it.isNotBlank() } ?: "内嵌 Tailscale 启动失败"
+                    else -> "内嵌 Tailscale 未就绪"
+                }
+            )
+        }
+        val (host, port) = Endpoints.target(rawUrl) ?: throw IOException("Tailscale 地址无效")
+        val local = tailscale.proxyFor(host, port)
+            ?: throw IOException("内嵌 Tailscale 本地代理启动失败")
+        return "http://127.0.0.1:$local"
+    }
+
+    /** Turn a raw pairing failure into something that names the likely cause. */
+    private fun pairFailureMessage(failure: Throwable, base: String, useTailscale: Boolean): String {
+        val message = failure.message?.takeIf { it.isNotBlank() } ?: "配对失败"
+        if (useTailscale || Endpoints.kindOf(base) != Endpoints.TAILSCALE) return message
+        return if (tailscale.state.value.enabled) {
+            "$message（这是 tailnet 地址：打开“通过 Tailscale 连接”再试）"
+        } else {
+            "$message（这是 tailnet 地址：打开“通过 Tailscale 连接”，或先启用内嵌 Tailscale）"
+        }
     }
 
     private fun matches(runtime: Runtime, info: BridgeInfo): Boolean {
@@ -249,7 +283,8 @@ class BridgeRepository(
             endpoints = Endpoints.merge(
                 baseUrl = runtime.profile.baseUrl,
                 existing = runtime.profile.endpoints,
-                incoming = listOf(BridgeEndpoint(kind = Endpoints.kindOf(normalized), url = normalized))
+                incoming = listOf(BridgeEndpoint(kind = Endpoints.kindOf(normalized), url = normalized)),
+                sort = false
             )
         )
         persist()
@@ -267,21 +302,35 @@ class BridgeRepository(
         refreshCatalogInternal(runtime)
     }
 
+    /**
+     * Pairs a desktop.
+     *
+     * [useTailscale] says the address is only reachable over the tailnet (a
+     * 100.x node, a MagicDNS name, or a host that forwards into a NAT VM). The
+     * dial then goes through the embedded node's loopback proxy, while the
+     * saved address stays the real one so later route probing keeps working.
+     */
     suspend fun pair(
         baseUrl: String,
         code: String,
         knownHostName: String? = null,
-        knownDeviceId: String? = null
+        knownDeviceId: String? = null,
+        useTailscale: Boolean = false
     ): Result<Unit> = runCatching {
         val base = normalizeBaseUrl(baseUrl)
-        val result = BridgeClient.pair(
-            rawBaseUrl = base,
-            code = code,
-            installId = installId,
-            deviceName = Build.MODEL ?: "Android",
-            model = Build.MODEL ?: "Android",
-            appVersion = BuildConfig.VERSION_NAME
-        )
+        val dialUrl = if (useTailscale) tailnetDialUrl(base) else base
+        val result = try {
+            BridgeClient.pair(
+                rawBaseUrl = dialUrl,
+                code = code,
+                installId = installId,
+                deviceName = Build.MODEL ?: "Android",
+                model = Build.MODEL ?: "Android",
+                appVersion = BuildConfig.VERSION_NAME
+            )
+        } catch (failure: Throwable) {
+            throw IOException(pairFailureMessage(failure, base, useTailscale), failure)
+        }
         val hostDeviceId = result.host?.id?.takeIf { it.isNotBlank() }
             ?: knownDeviceId?.takeIf { it.isNotBlank() }
         val byBase = runtimes.values.firstOrNull {
@@ -294,10 +343,15 @@ class BridgeRepository(
         }
         val existing = byBase ?: byDevice
         val id = existing?.profile?.id ?: HostStore.hostId(hostDeviceId, base)
-        val endpoints = Endpoints.merge(
-            baseUrl = base,
-            existing = existing?.profile?.endpoints.orEmpty(),
-            incoming = result.host?.endpoints.orEmpty() + BridgeEndpoint(kind = Endpoints.kindOf(base), url = base)
+        val endpoints = Endpoints.withKind(
+            Endpoints.merge(
+                baseUrl = base,
+                existing = existing?.profile?.endpoints.orEmpty(),
+                incoming = result.host?.endpoints.orEmpty() + BridgeEndpoint(kind = Endpoints.kindOf(base), url = base)
+            ),
+            base,
+            if (useTailscale) Endpoints.TAILSCALE else Endpoints.kindOf(base),
+            first = useTailscale
         )
         val profile = PairedHost(
             id = id,
@@ -333,10 +387,19 @@ class BridgeRepository(
             if (normalized.isNotBlank() && normalized != normalizeBaseUrl(runtime.profile.baseUrl)) {
                 runtime.profile = runtime.profile.copy(
                     baseUrl = normalized,
-                    endpoints = Endpoints.merge(
-                        baseUrl = normalized,
-                        existing = runtime.profile.endpoints,
-                        incoming = listOf(BridgeEndpoint(kind = Endpoints.kindOf(normalized), url = normalized))
+                    // Picking an address from the discovered list is an explicit
+                    // transport choice: it leads the probe order instead of being
+                    // re-sorted behind a LAN address that may not be routable.
+                    endpoints = Endpoints.withKind(
+                        Endpoints.merge(
+                            baseUrl = normalized,
+                            existing = runtime.profile.endpoints,
+                            incoming = listOf(BridgeEndpoint(kind = Endpoints.kindOf(normalized), url = normalized)),
+                            sort = false
+                        ),
+                        normalized,
+                        Endpoints.kindOf(normalized),
+                        first = true
                     )
                 )
                 persist()
@@ -671,7 +734,8 @@ class BridgeRepository(
             endpoints = Endpoints.merge(
                 baseUrl = opened.endpoint.url,
                 existing = runtime.profile.endpoints,
-                incoming = bridge?.endpoints.orEmpty()
+                incoming = bridge?.endpoints.orEmpty(),
+                sort = false
             )
         )
         persist()

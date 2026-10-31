@@ -30,6 +30,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -45,10 +47,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ts7.dshremote.data.BridgeRepository
 import com.ts7.dshremote.data.ConnectionState
 import com.ts7.dshremote.data.DiscoveredHost
 import com.ts7.dshremote.data.Discovery
+import com.ts7.dshremote.data.EmbeddedTailscale
+import com.ts7.dshremote.data.Endpoints
 import com.ts7.dshremote.data.HostStore
 import com.ts7.dshremote.data.HostSummary
 import com.ts7.dshremote.data.normalizeBaseUrl
@@ -79,6 +84,17 @@ fun ConnectScreen(
     var pairing by remember { mutableStateOf(false) }
     var discovered by remember { mutableStateOf<List<DiscoveredHost>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Manual add: LAN and tailnet are different transports, and the phone can
+    // only reach a tailnet address through the node it runs itself, so the user
+    // picks the route explicitly. Until the switch is touched it follows the
+    // address: a 100.x target turns it on, anything else stays on the LAN.
+    var useTailscale by remember { mutableStateOf(false) }
+    var tailscaleTouched by remember { mutableStateOf(false) }
+    val tailscaleState by repository.tailscale.state.collectAsStateWithLifecycle()
+    val looksTailnet = Endpoints.kindOf(normalizeBaseUrl(baseUrl)) == Endpoints.TAILSCALE
+    LaunchedEffect(looksTailnet, tailscaleState.enabled) {
+        if (!tailscaleTouched) useTailscale = looksTailnet && tailscaleState.enabled
+    }
 
     suspend fun scan() {
         scanning = true
@@ -257,6 +273,39 @@ fun ConnectScreen(
                 modifier = Modifier.padding(top = 6.dp, start = 2.dp)
             )
             Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clipCard()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("通过 Tailscale 连接", style = MaterialTheme.typography.titleSmall, color = TextPrimary)
+                    Text(
+                        tailscaleHint(useTailscale, tailscaleState),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (!useTailscale) TextMuted else tailscaleHintColor(tailscaleState),
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Switch(
+                    checked = useTailscale,
+                    onCheckedChange = {
+                        tailscaleTouched = true
+                        useTailscale = it
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color(0xFFFFFFFF),
+                        checkedTrackColor = Amber,
+                        uncheckedThumbColor = TextMuted,
+                        uncheckedTrackColor = Color(0xFFFFFFFF),
+                        uncheckedBorderColor = Outline
+                    )
+                )
+            }
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
                 value = code,
                 onValueChange = { value -> code = value.filter { it.isDigit() }.take(6) },
@@ -291,7 +340,8 @@ fun ConnectScreen(
                             baseUrl = baseUrl,
                             code = code,
                             knownHostName = known?.hostName,
-                            knownDeviceId = known?.deviceId
+                            knownDeviceId = known?.deviceId,
+                            useTailscale = useTailscale
                         ).onSuccess {
                             code = ""
                             onConnected()
@@ -327,6 +377,22 @@ fun ConnectScreen(
             }
         }
     }
+}
+
+private fun tailscaleHint(useTailscale: Boolean, state: EmbeddedTailscale.UiState): String = when {
+    !useTailscale -> "关闭时按局域网直连；目标在 tailnet（100.x）或电脑在 NAT 虚拟机里时打开。"
+    !state.enabled -> "内嵌 Tailscale 未启用：到 设置 → 内嵌 Tailscale 打开后重试。"
+    state.phase == EmbeddedTailscale.Phase.Connected -> "经 App 内嵌节点配对，不需要系统 VPN。"
+    state.phase == EmbeddedTailscale.Phase.NeedsLogin -> "内嵌 Tailscale 需要登录 tailnet，请到设置里完成登录。"
+    state.phase == EmbeddedTailscale.Phase.Starting -> "内嵌 Tailscale 正在连接…"
+    state.phase == EmbeddedTailscale.Phase.Error -> state.error?.takeIf { it.isNotBlank() } ?: "内嵌 Tailscale 启动失败"
+    else -> "内嵌 Tailscale 未就绪"
+}
+
+private fun tailscaleHintColor(state: EmbeddedTailscale.UiState): Color = when {
+    !state.enabled || state.phase == EmbeddedTailscale.Phase.Error -> Danger
+    state.phase == EmbeddedTailscale.Phase.Connected -> Amber
+    else -> TextMuted
 }
 
 private fun connectionColor(state: ConnectionState) = when (state) {
