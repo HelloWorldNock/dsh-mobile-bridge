@@ -55,8 +55,16 @@
 - 对端如果不是 0.8.4，派活仍走裸 `cwd`（兼容路径），但不会自动归位到工作区。
 - 改了 host 代码需要完整退出并重启 DSH；只改面板刷新页面即可。
 
+## 附件
+
+- `dsh-mobile-bridge-0.8.4.tgz` — 插件包，已含 `bin/tsnode-windows-amd64.exe`
+- `TS7-DSH-Remote-0.8.4-debug.apk` — Android 客户端
+- `SHA256SUMS-0.8.4.txt`
+
 ## 安装
 
 ```
 dsh plugin --profile desktop add file:.<下载目录>\dsh-mobile-bridge-0.8.4.tgz
 ```
+
+装完要完整退出并重启 DSH（不是刷新页面），面板才会用上新的 host 代码。
