@@ -109,6 +109,11 @@ class BridgeRepository(
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var routeCheckJob: Job? = null
 
+    /** 版本检查只跟这台手机有关，不挂在任何一台 PC 的 runtime 上。 */
+    private var update: AppUpdate? = null
+    private var updateChecking = false
+    private var updateJob: Job? = null
+
     /**
      * 流式事件（assistant.delta / session.event）一秒能来几十上百条，每条都重建一整个
      * AppState 会把整屏重组的代价乘上事件数。合并成一个 60ms 的节拍再推给 UI。
@@ -158,6 +163,21 @@ class BridgeRepository(
             runtimes.values.forEach(::ensureConnected)
         }
         sync()
+        // 启动时只在距上次检查超过 6 小时才查一次，避免每次冷启动都打 GitHub。
+        if (UpdateChecker.shouldAutoCheck(appContext)) checkUpdate()
+    }
+
+    /** 查 GitHub 上有没有新版本；只提示，不自动下载安装。 */
+    fun checkUpdate() {
+        if (updateJob?.isActive == true) return
+        updateChecking = true
+        sync()
+        updateJob = scope.launch {
+            val result = UpdateChecker.check(appContext, BuildConfig.VERSION_NAME)
+            update = result
+            updateChecking = false
+            sync()
+        }
     }
 
     /** Re-probe LAN/Tailscale after the app returns to the foreground. */
@@ -1278,7 +1298,9 @@ class BridgeRepository(
             restored = started,
             group = active?.group,
             hosts = hosts,
-            pendingHosts = pendingHosts
+            pendingHosts = pendingHosts,
+            update = update,
+            updateChecking = updateChecking
         )
 
         _hostSnapshots.value = runtimes.values.map { runtime ->

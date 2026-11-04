@@ -1,4 +1,4 @@
-﻿# TS7 DSH Remote
+# TS7 DSH Remote
 
 在局域网或 Tailscale 网络中，用 Android 手机远程操作 DeepSeek Harness（DSH）的 host 插件 + 原生 App。
 
@@ -80,6 +80,7 @@ dist/                 debug APK 与插件 tgz 产物
 - 桥接监听 `0.0.0.0:48123`，UDP 发现 `48124`；虚拟机场景由宿主机中继在 `48126/udp` 代答
 - 打开方式：DSH 侧栏底部「手机远控」按钮，或 设置 → 插件 → 手机远控 卡片
 - 面板显示设备 ID、IP、6 位配对码（120 秒有效）、已配对设备、开关和超时
+- 面板底部「版本」卡片显示当前插件版本，「检查更新」会去 GitHub 比对最新 release；手机端 设置 → 关于 同样有「检查更新」，启动后 6 小时内只自动查一次
 - 图标使用 `绘制图标.png` 生成的 Q 版鲸鱼 adaptive icon，生成脚本为 `tools/make_icon.py`
 
 本机这份是开发态：目录联接 + `dsh.profile.bundles` 里写着 `"dsh-mobile-bridge"`，改 `host/` 里的代码立即生效。
@@ -92,7 +93,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.8.2.tgz（约 8.9 MB / 23 个文件，含 bin/tsnode-windows-amd64.exe）
+# → dist/dsh-mobile-bridge-0.8.3.tgz（约 8.9 MB / 23 个文件，含 bin/tsnode-windows-amd64.exe）
 ```
 
 包体积变大是因为从 0.8.0 起插件自带内嵌 Tailscale 节点程序；节点程序缺失时脚本只警告并提示先跑 `tools/build-tsnode.ps1`，但打包清单里缺它会直接失败。插件、APK 与 GitHub Release tag 现在用同一个版本号。
@@ -100,16 +101,16 @@ powershell -NoProfile -File tools/pack-plugin.ps1
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.2.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.3.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
 
-分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.2.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
+分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.3.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.8.2-debug.apk`。
+1. 安装 `dist/TS7-DSH-Remote-0.8.3-debug.apk`。
 2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
 3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`，并打开表单下方的「通过 Tailscale 连接」开关）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
@@ -354,8 +355,8 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.8.2-debug.apk`
-- `dist/dsh-mobile-bridge-0.8.2.tgz`
+- `dist/TS7-DSH-Remote-0.8.3-debug.apk`
+- `dist/dsh-mobile-bridge-0.8.3.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `README.md`

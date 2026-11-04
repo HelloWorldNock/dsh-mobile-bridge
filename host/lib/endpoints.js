@@ -85,3 +85,23 @@ export function bridgeEndpoints(port, interfaces = os.networkInterfaces(), extra
 export function tailscaleEndpoints(port, interfaces = os.networkInterfaces(), extra = []) {
   return bridgeEndpoints(port, interfaces, extra).filter((endpoint) => endpoint.kind === 'tailscale')
 }
+
+/**
+ * 判断一个地址是否落在 tailnet 里（100.64.0.0/10 或 *.ts.net）。
+ * 绑定组用它决定「本机该把哪个地址告诉对端」：对端走 tailnet，本机也得给 tailnet 地址。
+ */
+export function isTailnetHost(value) {
+  if (typeof value !== 'string' || value.trim() === '') return false
+  const text = value.trim().toLowerCase()
+  let host = ''
+  try {
+    host = new URL(/^[a-z][a-z0-9+.-]*:\/\//.test(text) ? text : `http://${text}`).hostname
+  } catch {
+    return false
+  }
+  if (host.endsWith('.ts.net')) return true
+  if (host.startsWith('[')) return false
+  const parts = host.split('.').map((part) => Number(part))
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) return false
+  return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127
+}

@@ -18,8 +18,8 @@
         "en": "Drive DeepSeek Harness from an Android phone on the same Wi-Fi: a 6-digit pairing code opens a token-gated bridge, then the phone lists sessions, sends prompts, approves tool calls, reviews plans and receives notifications. UDP discovery, automatic reconnect, and approval fallback to the desktop client when the phone is away. All traffic stays on the LAN."
       },
       "npm": "dsh-mobile-bridge",
-      "tarball": "https://github.com/HelloWorldNock/dsh-mobile-bridge/releases/latest/download/dsh-mobile-bridge-0.1.0.tgz",
-      "version": "0.1.0",
+      "tarball": "https://github.com/HelloWorldNock/dsh-mobile-bridge/releases/latest/download/dsh-mobile-bridge-0.8.3.tgz",
+      "version": "0.8.3",
       "icon": "https://raw.githubusercontent.com/HelloWorldNock/dsh-mobile-bridge/main/host/icon.png",
       "install": "dsh plugin --profile web add dsh-mobile-bridge",
       "added": "2026-10-27"

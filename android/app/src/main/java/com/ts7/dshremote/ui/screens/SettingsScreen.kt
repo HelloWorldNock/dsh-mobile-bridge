@@ -66,6 +66,7 @@ import com.ts7.dshremote.notify.Reliability
 import com.ts7.dshremote.ui.ConnectionPill
 import com.ts7.dshremote.ui.SectionLabel
 import com.ts7.dshremote.ui.StatusDot
+import com.ts7.dshremote.ui.formatTime
 import com.ts7.dshremote.ui.theme.Amber
 import com.ts7.dshremote.ui.theme.Danger
 import com.ts7.dshremote.ui.theme.Ink
@@ -87,7 +88,8 @@ fun SettingsScreen(
     onForgetHost: (String) -> Unit,
     onAddEndpoint: (String, String) -> Result<Unit>,
     onApprovals: () -> Unit,
-    onLinkGroup: suspend () -> String?
+    onLinkGroup: suspend () -> String?,
+    onCheckUpdate: () -> Unit
 ) {
     var forgetTarget by remember { mutableStateOf<HostSummary?>(null) }
     var endpointDialog by remember { mutableStateOf(false) }
@@ -382,11 +384,40 @@ fun SettingsScreen(
                 }
 
                 SectionLabel("关于")
-                Text(
-                    "TS7 DSH Remote ${BuildConfig.VERSION_NAME}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextPrimary
-                )
+                val update = state.update
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "TS7 DSH Remote ${BuildConfig.VERSION_NAME}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextPrimary
+                        )
+                        Text(
+                            when {
+                                update == null -> "还没查过 GitHub 上的最新版本"
+                                update.error != null -> update.error
+                                update.hasUpdate -> "有新版本 ${update.latest} · ${formatTime(update.checkedAt)} 查过"
+                                else -> "已是最新版本 · ${formatTime(update.checkedAt)} 查过"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (update?.hasUpdate == true) Amber else TextMuted,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    TextButton(onClick = onCheckUpdate, enabled = !state.updateChecking) {
+                        Text(if (state.updateChecking) "检查中…" else "检查更新")
+                    }
+                }
+                update?.takeIf { it.hasUpdate }?.let { latest ->
+                    TextButton(onClick = {
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(latest.url))) }
+                    }) {
+                        Text("去下载 ${latest.latest}", color = Amber)
+                    }
+                }
                 Text(
                     "Android 客户端 · 通过局域网同时连接多台 DeepSeek Harness 主机",
                     style = MaterialTheme.typography.bodySmall,

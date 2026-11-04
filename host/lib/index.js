@@ -8,12 +8,13 @@ import { createDiscovery } from './discovery.js'
 import { createTailscale } from './tailscale.js'
 import { createGroup } from './group.js'
 import { createCollab } from './collab.js'
+import { createUpdater } from './update.js'
 import { createCollabTool, registerCollabTool } from './tool.js'
 
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.8.2'
+const VERSION = '0.8.3'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,
@@ -52,6 +53,7 @@ export function apply(ctx, config) {
   let broadcast = null
   let group = null
   let collab = null
+  let updater = null
   let actualPort = cfg.port
 
   async function start() {
@@ -79,6 +81,9 @@ export function apply(ctx, config) {
       port: () => actualPort
     })
     collab = createCollab({ group, logger })
+
+    // 版本检查：只查 GitHub 上最新 release，不自动下载、不自动安装。
+    updater = createUpdater({ version: VERSION, logger })
 
     // 嵌入式 userspace tailnet 节点：手机在没有系统 Tailscale 的 PC 上也能连。
     tailscale = createTailscale({
@@ -157,13 +162,15 @@ export function apply(ctx, config) {
       ctx,
       onDiscoveryChange: syncDiscovery,
       tailscale,
-      group
+      group,
+      updater
     })
 
     actualPort = await server.listen()
     await tailscale.configure(actualPort)
     await tailscale.start()
     group.start()
+    updater.start()
     registerCollabTool({ ctx, tool: createCollabTool({ collab }), logger })
     syncDiscovery()
     logger.info?.(`[mobile-bridge] listening on http://${cfg.bindHost}:${actualPort} (discovery udp/${cfg.discoveryPort})`)
@@ -183,6 +190,7 @@ export function apply(ctx, config) {
           discovery?.close()
           discovery = null
           group?.dispose()
+          updater?.dispose()
           await tailscale?.dispose()
           await server?.close()
           approvals?.dispose()

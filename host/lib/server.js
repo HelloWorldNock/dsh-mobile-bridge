@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { BridgeError } from './auth.js'
 import { lanAddresses, resolveDshHome } from './state.js'
-import { bridgeEndpoints } from './endpoints.js'
+import { bridgeEndpoints, isTailnetHost } from './endpoints.js'
 import { projectRecords, serializeSummary } from './dto.js'
 import { normalizeBaseUrl } from './group.js'
 
@@ -219,7 +219,7 @@ function toEpochMillis(value) {
   return undefined
 }
 
-export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null }) {
+export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null, updater = null }) {
   const csrf = randomBytes(24).toString('base64url')
   let server = null
 
@@ -371,8 +371,22 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       csrf,
       version,
       group: group?.snapshot?.() ?? { group: null, peers: [], invite: null },
+      update: updater?.snapshot?.() ?? null,
       collabRoot: collabRoot()
     }
+  }
+
+  // 本机要告诉对端的回连地址：对端走 tailnet 就给 tailnet 地址，
+  // 否则给局域网地址——否则跨网络组起来的组，心跳会打到一个对端连不上的 IP 上。
+  function advertisedBaseUrl(peerUrl, explicit) {
+    const given = normalizeBaseUrl(explicit)
+    if (given !== null) return given
+    const endpoints = allEndpoints()
+    const tailnet = endpoints.filter((endpoint) => endpoint.kind === 'tailscale')
+    const pool = tailnet.length > 0 && isTailnetHost(peerUrl) ? tailnet : endpoints
+    const picked = pool.find((endpoint) => typeof endpoint.url === 'string' && endpoint.url !== '')
+    if (picked !== undefined) return picked.url
+    return `http://${lanAddresses()[0]?.address ?? '127.0.0.1'}:${config.port}`
   }
 
   function service(name) {
@@ -447,6 +461,13 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         sendJson(res, 200, { ok: true, tailscale: tailscale.status() })
         return
       }
+      if (path === '/api/setup/update') {
+        if (updater === null) throw new BridgeError('update/unavailable', '当前版本不支持检查更新', 503)
+        const body = await readJson(req)
+        const update = await updater.check({ force: body.force === true })
+        sendJson(res, 200, { ok: true, update })
+        return
+      }
       if (path === '/api/setup/code') {
         const pairing = auth.rotateCode()
         sendJson(res, 200, { code: pairing.code, expiresAt: new Date(pairing.expiresAt).toISOString() })
@@ -486,9 +507,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
           return
         }
         if (action === 'join') {
-          const selfBaseUrl =
-            normalizeBaseUrl(body.selfBaseUrl) ??
-            `http://${lanAddresses()[0]?.address ?? '127.0.0.1'}:${config.port}`
+          const selfBaseUrl = advertisedBaseUrl(body.baseUrl, body.selfBaseUrl)
           sendJson(res, 200, await group.joinRemote({ baseUrl: body.baseUrl, code: body.code, selfBaseUrl, collabRoot: collabRoot() }))
           return
         }
@@ -639,8 +658,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     if (method === 'POST' && path === '/api/group/link') {
       if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
       const body = await readJson(req)
-      const selfBaseUrl =
-        normalizeBaseUrl(body.selfBaseUrl) ?? `http://${lanAddresses()[0]?.address ?? '127.0.0.1'}:${config.port}`
+      const selfBaseUrl = advertisedBaseUrl(body.peerBaseUrl, body.selfBaseUrl)
       const result = await group.joinRemote({
         baseUrl: body.peerBaseUrl,
         code: body.code,

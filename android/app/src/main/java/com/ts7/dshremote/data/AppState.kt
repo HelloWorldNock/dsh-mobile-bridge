@@ -62,7 +62,9 @@ data class AppState(
     val restored: Boolean = false,
     val group: GroupInfo? = null,
     val hosts: List<HostSummary> = emptyList(),
-    val pendingHosts: List<HostPending> = emptyList()
+    val pendingHosts: List<HostPending> = emptyList(),
+    val update: AppUpdate? = null,
+    val updateChecking: Boolean = false
 ) {
     val connected: Boolean get() = connection == ConnectionState.Connected
     val activeSession: SessionSummary? get() = sessions.firstOrNull { it.id == activeSessionId } ?: detail?.session

@@ -143,6 +143,31 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       return date.toLocaleString("zh-CN", { hour12: false })
     }
 
+    // 面板上用户常常直接粘「192.168.1.10:48123」，没有 http://。
+    // 这里先本地判一遍，能自动补全的就补全，补不了的当场给可读的提示，
+    // 不要等到提交后由服务端回一句 400（那条提示原来还会被轮询抹掉）。
+    function parseGroupUrl(text) {
+      const raw = String(text || "").trim().replace(/\/+$/, "")
+      if (raw === "") return { url: "", error: "先填对方 PC 的地址" }
+      const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`
+      let parsed = null
+      try {
+        parsed = new URL(withScheme)
+      } catch (_) {
+        parsed = null
+      }
+      if (parsed === null || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) {
+        return { url: "", error: "地址看不懂，填对方 PC 的地址，例如 192.168.1.10:48123" }
+      }
+      if (parsed.port === "") {
+        return { url: "", error: "地址要带端口，通常是 48123，例如 192.168.1.10:48123" }
+      }
+      if (parsed.username !== "" || parsed.password !== "") {
+        return { url: "", error: "地址不要带用户名密码" }
+      }
+      return { url: `${parsed.protocol}//${parsed.host}`, error: "" }
+    }
+
     function formatCode(code) {
       const raw = String(code || "").replace(/\D/g, "")
       if (raw.length !== 6) return code || "------"
@@ -171,6 +196,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const [snap, setSnap] = useState(null)
       const [form, setForm] = useState(null)
       const [error, setError] = useState("")
+      const [actionError, setActionError] = useState(null)
       const [saved, setSaved] = useState("")
       const [busy, setBusy] = useState("")
       const [now, setNow] = useState(Date.now())
@@ -225,7 +251,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const post = useCallback(
         async (label, path, body) => {
           setBusy(label)
-          setError("")
+          setActionError(null)
           try {
             const result = await api(path, {
               method: "POST",
@@ -233,9 +259,12 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
               body: JSON.stringify(body || {}),
             })
             await load()
+            setActionError(null)
             return result
           } catch (cause) {
-            setError(cause.message || "操作失败")
+            // 操作失败只写进 actionError：它常驻在对应卡片里，且不会被 3 秒轮询清掉，
+            // 也不会把顶部状态灯带成「桥接未运行」。
+            setActionError({ label, message: cause.message || "操作失败" })
             return null
           } finally {
             setBusy("")
@@ -246,7 +275,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
 
       const refreshCode = useCallback(async () => {
         setBusy("code")
-        setError("")
+        setActionError(null)
         try {
           const result = await api("/api/setup/code", {
             method: "POST",
@@ -255,7 +284,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
           })
           setSnap((current) => (current ? { ...current, code: result.code, codeExpiresAt: result.expiresAt } : current))
         } catch (cause) {
-          setError(cause.message || "刷新配对码失败")
+          setActionError({ label: "code", message: cause.message || "刷新配对码失败" })
         } finally {
           setBusy("")
         }
@@ -277,6 +306,11 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
         }
       }, [snap])
 
+      // 只查 GitHub 上最新的 release，不自动下载：PC 侧要升级还得重装插件包。
+      const checkUpdate = useCallback(async () => {
+        await post("update", "/api/setup/update", { force: true })
+      }, [post])
+
       const copyEndpoint = useCallback(async (endpoint) => {
         if (!navigator.clipboard) return
         try {
@@ -293,10 +327,16 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const total = 120
       const percent = Math.max(0, Math.min(100, (left / total) * 100))
       const online = Boolean(snap) && !error
+      const actionLabel = actionError ? String(actionError.label || "") : ""
+      const groupError = actionLabel.startsWith("group") ? actionError.message : ""
+      const settingsError = actionLabel === "save" || actionLabel.startsWith("ts") ? actionError.message : ""
+      const updateError = actionLabel === "update" ? actionError.message : ""
+      const otherError = actionError !== null && groupError === "" && settingsError === "" && updateError === "" ? actionError.message : ""
       const ts = snap ? snap.tailscale ?? null : null
       const tsPhase = ts ? ts.phase || "off" : "off"
       const tsEnabled = ts ? ts.enabled === true : false
       const tsLog = ts && Array.isArray(ts.log) ? ts.log : []
+      const update = snap && snap.update ? snap.update : null
 
       return h(
         "div",
@@ -323,7 +363,8 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
             h(Status, { ok: online, text: online ? `桥接运行中 · ${BRIDGE_PORT}` : "桥接未运行" }),
             snap ? h("span", { className: "dmb-sub" }, `${snap.clients || 0} 台手机在线`) : null,
           ),
-          error ? h("div", { className: "dmb-alert" }, error + "。确认 DSH 已加载 dsh-mobile-bridge，并重启过桌面端。") : null,
+          error ? h("div", { className: "dmb-alert" }, `${error}。DSH 里的桥接服务没有响应，重启桌面端后再看这里。`) : null,
+          otherError ? h("div", { className: "dmb-alert" }, otherError) : null,
           snap
             ? h(
                 "div",
@@ -589,6 +630,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                   "div",
                   { className: "dmb-card" },
                   h("div", { className: "dmb-label", style: { marginBottom: 8 } }, "PC 绑定组"),
+                  groupError !== "" ? h("div", { className: "dmb-alert", style: { marginBottom: 10 } }, groupError) : null,
                   h(
                     "div",
                     { className: "dmb-setting" },
@@ -704,7 +746,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                           "div",
                           { className: "grow" },
                           h("div", { className: "name" }, "加入别人的组"),
-                          h("div", { className: "hint" }, "填对方 PC 的地址和它面板上显示的邀请码。"),
+                          h("div", { className: "hint" }, "填对方 PC 的地址（端口 48123，可以省略 http://）和它面板上显示的 6 位邀请码。"),
                           h(
                             "div",
                             { className: "dmb-join" },
@@ -726,12 +768,22 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                           "button",
                           {
                             className: "dmb-btn primary",
-                            disabled: busy !== "" || groupUrl.trim() === "" || groupCode.trim() === "",
+                            disabled: busy !== "",
                             onClick: async () => {
+                              const parsed = parseGroupUrl(groupUrl)
+                              const code = groupCode.replace(/\D/g, "")
+                              if (parsed.error !== "") {
+                                setActionError({ label: "group-join", message: parsed.error })
+                                return
+                              }
+                              if (code.length !== 6) {
+                                setActionError({ label: "group-join", message: "邀请码是 6 位数字，请核对对方面板上的码" })
+                                return
+                              }
                               const result = await post("group-join", "/api/setup/group", {
                                 action: "join",
-                                baseUrl: groupUrl.trim(),
-                                code: groupCode.trim(),
+                                baseUrl: parsed.url,
+                                code,
                               })
                               if (result) {
                                 setGroupUrl("")
@@ -752,6 +804,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                 "div",
                 { className: "dmb-card" },
                 h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "桥接设置"),
+                settingsError !== "" ? h("div", { className: "dmb-alert", style: { marginBottom: 10 } }, settingsError) : null,
                 h(
                   "div",
                   { className: "dmb-setting" },
@@ -803,6 +856,68 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                   h("button", { className: "dmb-btn primary", onClick: saveSettings, disabled: busy !== "" }, busy === "save" ? "保存中…" : "保存设置"),
                   saved ? h("span", { className: "dmb-saved" }, saved) : null,
                 ),
+              )
+            : null,
+          snap
+            ? h(
+                "div",
+                { className: "dmb-card" },
+                h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "版本"),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, `dsh-mobile-bridge ${snap.version || ""}`),
+                    h(
+                      "div",
+                      { className: "hint" },
+                      update === null
+                        ? "还没查过 GitHub 上的最新版本。"
+                        : update.error
+                          ? update.error
+                          : update.hasUpdate
+                            ? `发现新版本 ${update.latest}（当前 ${update.current}），${fmtTime(update.checkedAt)} 查到。`
+                            : `已是最新版本，${fmtTime(update.checkedAt)} 查过。`,
+                    ),
+                  ),
+                  h(
+                    "button",
+                    { className: "dmb-btn", disabled: busy !== "", onClick: checkUpdate },
+                    busy === "update" ? "检查中…" : "检查更新",
+                  ),
+                ),
+                updateError !== "" ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, updateError) : null,
+                update !== null && update.hasUpdate
+                  ? h(
+                      "div",
+                      { className: "dmb-setting" },
+                      h(
+                        "div",
+                        { className: "grow" },
+                        h("div", { className: "name" }, `新版本 ${update.latest}`),
+                        h(
+                          "div",
+                          { className: "hint" },
+                          update.notes ? update.notes : "去发布页看这次改了什么。",
+                        ),
+                      ),
+                      h(
+                        "a",
+                        { className: "dmb-btn primary", href: update.url, target: "_blank", rel: "noreferrer" },
+                        "打开发布页",
+                      ),
+                    )
+                  : null,
+                update !== null && !update.hasUpdate && update.url
+                  ? h(
+                      "div",
+                      { className: "dmb-sub", style: { marginTop: 8 } },
+                      "更新包：",
+                      h("a", { href: update.url, target: "_blank", rel: "noreferrer", style: { color: "#4D6BFE" } }, update.url),
+                    )
+                  : null,
               )
             : null,
           snap

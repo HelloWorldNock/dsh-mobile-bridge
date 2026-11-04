@@ -8,7 +8,7 @@
 url: https://github.com/HelloWorldNock/dsh-mobile-bridge
 name: HelloWorldNock/dsh-mobile-bridge
 category: remote
-tarball: https://github.com/HelloWorldNock/dsh-mobile-bridge/releases/latest/download/dsh-mobile-bridge-0.1.0.tgz
+tarball: https://github.com/HelloWorldNock/dsh-mobile-bridge/releases/latest/download/dsh-mobile-bridge-0.8.3.tgz
 description:
   zh: "在同一局域网内用 Android 手机操作 DSH：6 位配对码建立长连接后，浏览任务、发送 prompt、审批工具调用、审阅计划并接收通知。桥接端口自带 Bearer token 鉴权，支持 UDP 自动发现与断线重连；手机不在线时审批自动回落桌面客户端。全部流量留在本地，不经过公网。"
   en: "Drive DeepSeek Harness from an Android phone on the same Wi-Fi: a 6-digit pairing code opens a token-gated bridge, then the phone lists sessions, sends prompts, approves tool calls, reviews plans and receives notifications. UDP discovery, automatic reconnect, and approval fallback to the desktop client when the phone is away. All traffic stays on the LAN."

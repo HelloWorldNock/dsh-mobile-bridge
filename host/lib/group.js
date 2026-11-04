@@ -25,14 +25,23 @@ function cleanText(value, max) {
     .slice(0, max)
 }
 
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
+
+/**
+ * 把用户填的地址收敛成 http(s)://host[:port]。
+ * 面板上常见只填 `192.168.1.10:48123`，少了 http:// 时按 http 处理，
+ * 而不是直接判非法——否则用户只会看到「点击加入没反应」。
+ */
 export function normalizeBaseUrl(value) {
   if (typeof value !== 'string') return null
   const text = value.trim().replace(/\/+$/, '')
   if (text === '') return null
+  const withScheme = HAS_SCHEME.test(text) ? text : `http://${text}`
   try {
-    const url = new URL(text)
+    const url = new URL(withScheme)
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-    return text
+    if (url.username !== '' || url.password !== '') return null
+    return `${url.protocol}//${url.host}`
   } catch {
     return null
   }
