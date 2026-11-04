@@ -270,6 +270,47 @@ data class AnswerItem(
     val custom: String? = null
 )
 
+@Serializable
+data class GroupBody(
+    val id: String = "",
+    val name: String = "",
+    val createdAt: String = ""
+)
+
+@Serializable
+data class GroupPeer(
+    val deviceId: String = "",
+    val name: String = "",
+    val baseUrl: String = "",
+    val groupId: String? = null,
+    val version: String? = null,
+    val collabRoot: String? = null,
+    val status: String = "offline"
+)
+
+@Serializable
+data class GroupInviteCode(
+    val code: String = "",
+    val expiresAt: String = ""
+)
+
+@Serializable
+data class GroupInfo(
+    val group: GroupBody? = null,
+    val peers: List<GroupPeer> = emptyList(),
+    val invite: GroupInviteCode? = null,
+    val collabRoot: String? = null
+)
+
+@Serializable
+data class GroupInviteResponse(
+    val group: GroupBody? = null,
+    val peers: List<GroupPeer> = emptyList(),
+    val invite: GroupInviteCode? = null,
+    val collabRoot: String? = null,
+    val endpoints: List<BridgeEndpoint> = emptyList()
+)
+
 data class SseEvent(val name: String, val data: String)
 
 enum class ConnectionState { Disconnected, Connecting, Connected, Error }

@@ -6,11 +6,14 @@ import { createApprovals } from './approvals.js'
 import { createBridgeServer } from './server.js'
 import { createDiscovery } from './discovery.js'
 import { createTailscale } from './tailscale.js'
+import { createGroup } from './group.js'
+import { createCollab } from './collab.js'
+import { createCollabTool, registerCollabTool } from './tool.js'
 
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.8.1'
+const VERSION = '0.8.2'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,
@@ -47,6 +50,8 @@ export function apply(ctx, config) {
   let hub = null
   let approvals = null
   let broadcast = null
+  let group = null
+  let collab = null
   let actualPort = cfg.port
 
   async function start() {
@@ -66,8 +71,16 @@ export function apply(ctx, config) {
       logger
     })
 
-    // Embedded userspace tailnet node: lets a phone on the tailnet reach this
-    // bridge even when the PC has no system Tailscale installed.
+    // 绑定组：同一部手机绑定过的 PC 端互相登记，形成可协作的小组。
+    group = createGroup({
+      state,
+      save: () => saveState(state, statePath),
+      logger,
+      port: () => actualPort
+    })
+    collab = createCollab({ group, logger })
+
+    // 嵌入式 userspace tailnet 节点：手机在没有系统 Tailscale 的 PC 上也能连。
     tailscale = createTailscale({
       settings: state.settings,
       save: () => saveState(state, statePath),
@@ -143,12 +156,15 @@ export function apply(ctx, config) {
       version: VERSION,
       ctx,
       onDiscoveryChange: syncDiscovery,
-      tailscale
+      tailscale,
+      group
     })
 
     actualPort = await server.listen()
     await tailscale.configure(actualPort)
     await tailscale.start()
+    group.start()
+    registerCollabTool({ ctx, tool: createCollabTool({ collab }), logger })
     syncDiscovery()
     logger.info?.(`[mobile-bridge] listening on http://${cfg.bindHost}:${actualPort} (discovery udp/${cfg.discoveryPort})`)
     logger.info?.(`[mobile-bridge] open http://127.0.0.1:${actualPort}/ on this PC to pair a phone`)
@@ -166,6 +182,7 @@ export function apply(ctx, config) {
         try {
           discovery?.close()
           discovery = null
+          group?.dispose()
           await tailscale?.dispose()
           await server?.close()
           approvals?.dispose()

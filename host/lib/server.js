@@ -1,11 +1,12 @@
 import http from 'node:http'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync, readdirSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { BridgeError } from './auth.js'
 import { lanAddresses, resolveDshHome } from './state.js'
 import { bridgeEndpoints } from './endpoints.js'
 import { projectRecords, serializeSummary } from './dto.js'
+import { normalizeBaseUrl } from './group.js'
 
 const MAX_BODY_BYTES = 33_554_432
 const MAX_PROMPT_CHARS = 20_000
@@ -16,6 +17,93 @@ const MAX_IMAGE_BYTES = 8_388_608
 const MAX_IMAGE_TOTAL_BYTES = 16_777_216
 const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const LOCAL_ORIGIN = /^(?:https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?|dsh-app:\/\/[^/]+)$/
+
+const MAX_ARTIFACT_FILES = 200
+const MAX_ARTIFACT_DEPTH = 6
+const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+const SKIPPED_DIRS = new Set(['node_modules', '.git', '.dsh', '__pycache__', '.venv', 'venv', '.cache', '.idea'])
+const MEDIA_TYPES = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.webp', 'image/webp'],
+  ['.gif', 'image/gif'],
+  ['.svg', 'image/svg+xml'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.txt', 'text/plain; charset=utf-8'],
+  ['.md', 'text/markdown; charset=utf-8'],
+  ['.csv', 'text/csv; charset=utf-8']
+])
+
+function mediaTypeFor(file) {
+  return MEDIA_TYPES.get(extname(file).toLowerCase()) ?? 'application/octet-stream'
+}
+
+function absoluteDir(value, label = 'cwd') {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new BridgeError('collab/bad-request', `${label} 不能为空`, 400)
+  }
+  const text = value.trim()
+  if (!isAbsolute(text)) throw new BridgeError('collab/bad-request', `${label} 必须是绝对路径`, 400)
+  const dir = resolve(text)
+  if (!existsSync(dir)) throw new BridgeError('collab/not-found', `目录不存在：${dir}`, 404)
+  return dir
+}
+
+function listWorkspaceFiles(dir, since) {
+  const cutoff = Number.isFinite(since) && since > 0 ? since : 0
+  const out = []
+  const walk = (current, depth) => {
+    if (out.length >= MAX_ARTIFACT_FILES || depth > MAX_ARTIFACT_DEPTH) return
+    let entries
+    try {
+      entries = readdirSync(current, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (out.length >= MAX_ARTIFACT_FILES) return
+      const full = join(current, entry.name)
+      if (entry.isDirectory()) {
+        if (!entry.name.startsWith('.') && !SKIPPED_DIRS.has(entry.name)) walk(full, depth + 1)
+        continue
+      }
+      if (!entry.isFile()) continue
+      let info
+      try {
+        info = statSync(full)
+      } catch {
+        continue
+      }
+      if (cutoff > 0 && info.mtimeMs < cutoff) continue
+      out.push({
+        path: full,
+        rel: relative(dir, full).split(sep).join('/'),
+        name: entry.name,
+        size: info.size,
+        mtime: Math.round(info.mtimeMs)
+      })
+    }
+  }
+  walk(dir, 0)
+  out.sort((left, right) => right.mtime - left.mtime)
+  return out
+}
+
+function resolveWorkspaceFile(dir, relPath) {
+  const text = typeof relPath === 'string' ? relPath.trim() : ''
+  if (text === '') throw new BridgeError('collab/bad-request', 'path 不能为空', 400)
+  const target = resolve(dir, text)
+  const rel = relative(dir, target)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new BridgeError('collab/forbidden', '只允许读取指定工作区目录内的文件', 403)
+  }
+  if (!existsSync(target)) throw new BridgeError('collab/not-found', '文件不存在', 404)
+  const info = statSync(target)
+  if (!info.isFile()) throw new BridgeError('collab/bad-request', '目标不是文件', 400)
+  if (info.size > MAX_ARTIFACT_BYTES) throw new BridgeError('collab/too-large', '文件过大', 413)
+  return { target, info }
+}
 
 function isLoopback(req) {
   const address = req.socket.remoteAddress ?? ''
@@ -131,7 +219,7 @@ function toEpochMillis(value) {
   return undefined
 }
 
-export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null }) {
+export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null }) {
   const csrf = randomBytes(24).toString('base64url')
   let server = null
 
@@ -153,6 +241,24 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     const device = auth.authenticate(header.slice('Bearer '.length).trim())
     if (device === undefined) throw new BridgeError('auth/unauthorized', '设备未配对或已被撤销', 401)
     return device
+  }
+
+  /**
+   * 手机 token 之外，绑定组密钥也能调用同一套接口（组内协作）。
+   * peer 身份不参与「手机是否在线」的判断，因此不会抢走审批卡片。
+   */
+  function requireIdentity(req) {
+    const header = req.headers.authorization
+    if (typeof header !== 'string' || !header.startsWith('Bearer ')) {
+      throw new BridgeError('auth/unauthorized', '需要 Bearer token', 401)
+    }
+    const token = header.slice('Bearer '.length).trim()
+    const device = auth.authenticate(token)
+    if (device !== undefined) return { kind: 'phone', device }
+    if (group !== null && group.secretMatches(token)) {
+      return { kind: 'peer', device: { id: `peer:${state.deviceId}`, name: `peer:${state.hostName}` } }
+    }
+    throw new BridgeError('auth/unauthorized', '设备未配对或已被撤销', 401)
   }
 
   async function allSummaries(signal) {
@@ -239,6 +345,21 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
   }
 
+  /** 协作目录白名单：为空表示不限，设了就把对端可写/可读的目录锁在根下。 */
+  function collabRoot() {
+    const value = typeof settings.collabRoot === 'string' ? settings.collabRoot.trim() : ''
+    return value === '' ? null : resolve(value)
+  }
+
+  function assertInCollabRoot(dir) {
+    const root = collabRoot()
+    if (root === null) return
+    const rel = relative(root, dir)
+    if (rel !== '' && (rel.startsWith('..') || isAbsolute(rel))) {
+      throw new BridgeError('collab/forbidden', `协作目录必须位于 ${root} 之内`, 403)
+    }
+  }
+
   async function setupState() {
     return {
       ...auth.setupState(),
@@ -248,7 +369,9 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       tailscale: tailscale?.status?.() ?? null,
       clients: broadcast.count(),
       csrf,
-      version
+      version,
+      group: group?.snapshot?.() ?? { group: null, peers: [], invite: null },
+      collabRoot: collabRoot()
     }
   }
 
@@ -350,6 +473,41 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         sendJson(res, 200, { settings: next })
         return
       }
+      if (path === '/api/setup/group') {
+        if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
+        const body = await readJson(req)
+        const action = typeof body.action === 'string' ? body.action : ''
+        if (action === 'create') {
+          sendJson(res, 200, group.create({ name: body.name }))
+          return
+        }
+        if (action === 'invite') {
+          sendJson(res, 200, { invite: group.rotateInvite(), ...group.snapshot() })
+          return
+        }
+        if (action === 'join') {
+          const selfBaseUrl =
+            normalizeBaseUrl(body.selfBaseUrl) ??
+            `http://${lanAddresses()[0]?.address ?? '127.0.0.1'}:${config.port}`
+          sendJson(res, 200, await group.joinRemote({ baseUrl: body.baseUrl, code: body.code, selfBaseUrl, collabRoot: collabRoot() }))
+          return
+        }
+        if (action === 'leave') {
+          sendJson(res, 200, group.leave())
+          return
+        }
+        if (action === 'forget') {
+          const removed = group.removePeer(typeof body.deviceId === 'string' ? body.deviceId : '')
+          sendJson(res, 200, { removed, ...group.snapshot() })
+          return
+        }
+        if (action === 'refresh') {
+          await group.refresh()
+          sendJson(res, 200, group.snapshot())
+          return
+        }
+        throw new BridgeError('setup/bad-request', '未知的绑定组操作', 400)
+      }
       if (path === '/api/setup/reset') {
         auth.revokeAll()
         auth.rotateCode()
@@ -382,7 +540,50 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       return
     }
 
-    const device = requireAuth(req)
+    // 组内握手：邀请码换共享密钥，以及 peer 之间探活。都不走手机 token。
+    if (method === 'POST' && path === '/api/group/join') {
+      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
+      const body = await readJson(req)
+      sendJson(
+        res,
+        200,
+        group.acceptJoin(
+          {
+            code: body.code,
+            baseUrl: body.baseUrl,
+            deviceId: body.deviceId,
+            name: body.name,
+            version: typeof body.version === 'string' ? body.version : null,
+            collabRoot: typeof body.collabRoot === 'string' ? body.collabRoot : null,
+            selfCollabRoot: collabRoot()
+          },
+          req.socket.remoteAddress
+        )
+      )
+      return
+    }
+
+    if (method === 'POST' && path === '/api/group/hello') {
+      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
+      const header = req.headers.authorization
+      const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : ''
+      if (!group.secretMatches(token)) throw new BridgeError('auth/unauthorized', '绑定组密钥不正确', 401)
+      sendJson(res, 200, {
+        groupId: state.group?.id ?? null,
+        name: state.group?.name ?? null,
+        deviceId: state.deviceId,
+        hostName: state.hostName,
+        version,
+        port: config.port,
+        endpoints: allEndpoints(),
+        collabRoot: collabRoot(),
+        peers: group.snapshot().peers
+      })
+      return
+    }
+
+    const identity = requireIdentity(req)
+    const device = identity.device
 
     if (method === 'GET' && path === '/api/info') {
       sendJson(res, 200, {
@@ -413,6 +614,64 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
           sessionIds: workspace.sessionIds ?? []
         }))
       })
+      return
+    }
+
+    if (method === 'GET' && path === '/api/group') {
+      sendJson(res, 200, { ...(group?.snapshot?.() ?? { group: null, peers: [], invite: null }), collabRoot: collabRoot() })
+      return
+    }
+
+    // 手机端组队：同一部手机绑定过的电脑，由手机牵线组成同一个绑定组。
+    if (method === 'POST' && path === '/api/group/invite') {
+      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
+      if (group.group === null) group.create({ name: null })
+      const invite = group.rotateInvite()
+      sendJson(res, 200, {
+        invite,
+        ...group.snapshot(),
+        endpoints: allEndpoints(),
+        collabRoot: collabRoot()
+      })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/group/link') {
+      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
+      const body = await readJson(req)
+      const selfBaseUrl =
+        normalizeBaseUrl(body.selfBaseUrl) ?? `http://${lanAddresses()[0]?.address ?? '127.0.0.1'}:${config.port}`
+      const result = await group.joinRemote({
+        baseUrl: body.peerBaseUrl,
+        code: body.code,
+        selfBaseUrl,
+        collabRoot: collabRoot()
+      })
+      sendJson(res, 200, { ...result, endpoints: allEndpoints(), collabRoot: collabRoot() })
+      return
+    }
+
+    if (method === 'GET' && path === '/api/collab/files') {
+      const dir = absoluteDir(url.searchParams.get('cwd'))
+      assertInCollabRoot(dir)
+      const since = Number(url.searchParams.get('since'))
+      sendJson(res, 200, { cwd: dir, files: listWorkspaceFiles(dir, since) })
+      return
+    }
+
+    if (method === 'GET' && path === '/api/collab/file') {
+      const dir = absoluteDir(url.searchParams.get('cwd'))
+      assertInCollabRoot(dir)
+      const { target, info } = resolveWorkspaceFile(dir, url.searchParams.get('path') ?? '')
+      const body = readFileSync(target)
+      res.writeHead(200, {
+        'content-type': mediaTypeFor(target),
+        'content-length': info.size,
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+        'content-disposition': `attachment; filename="${relative(dir, target).split(sep).join('_')}"`
+      })
+      res.end(body)
       return
     }
 
@@ -672,6 +931,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
 
     if (method === 'GET' && path === '/api/events') {
+      if (identity.kind === 'peer') throw new BridgeError('auth/forbidden', '绑定组成员不使用事件流', 403)
       res.writeHead(200, {
         'content-type': 'text/event-stream; charset=utf-8',
         'cache-control': 'no-cache, no-transform',

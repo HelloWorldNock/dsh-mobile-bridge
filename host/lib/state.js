@@ -39,12 +39,15 @@ export function createDefaultState() {
     hostName: os.hostname(),
     createdAt: new Date().toISOString(),
     devices: [],
+    group: null,
+    peers: [],
     settings: {
       phoneFirst: true,
       discovery: true,
       approvalTimeoutMs: 120_000,
       questionTimeoutMs: 120_000,
       planReviewTimeoutMs: 180_000,
+      collabRoot: '',
       embeddedTailscale: false,
       tailscaleAuthKey: '',
       tailscaleHostname: '',
@@ -76,6 +79,29 @@ function normalizeState(raw) {
             revokedAt: typeof d.revokedAt === 'string' ? d.revokedAt : null
           }))
       : [],
+    group:
+      raw.group !== null && typeof raw.group === 'object' && typeof raw.group.id === 'string' && typeof raw.group.secret === 'string'
+        ? {
+            id: raw.group.id,
+            name: typeof raw.group.name === 'string' ? raw.group.name : '绑定组',
+            secret: raw.group.secret,
+            createdAt: typeof raw.group.createdAt === 'string' ? raw.group.createdAt : new Date().toISOString()
+          }
+        : null,
+    peers: Array.isArray(raw.peers)
+      ? raw.peers
+          .filter((p) => p !== null && typeof p === 'object' && typeof p.deviceId === 'string' && typeof p.baseUrl === 'string')
+          .map((p) => ({
+            deviceId: p.deviceId,
+            name: typeof p.name === 'string' ? p.name : p.deviceId,
+            baseUrl: p.baseUrl,
+            groupId: typeof p.groupId === 'string' ? p.groupId : null,
+            version: typeof p.version === 'string' ? p.version : null,
+            collabRoot: typeof p.collabRoot === 'string' ? p.collabRoot : null,
+            addedAt: typeof p.addedAt === 'string' ? p.addedAt : new Date().toISOString(),
+            lastSeenAt: typeof p.lastSeenAt === 'string' ? p.lastSeenAt : null
+          }))
+      : [],
     settings: {
       phoneFirst: settings.phoneFirst !== false,
       discovery: settings.discovery !== false,
@@ -84,6 +110,7 @@ function normalizeState(raw) {
       planReviewTimeoutMs: Number.isFinite(settings.planReviewTimeoutMs)
         ? settings.planReviewTimeoutMs
         : base.settings.planReviewTimeoutMs,
+      collabRoot: typeof settings.collabRoot === 'string' ? settings.collabRoot.trim() : '',
       embeddedTailscale: settings.embeddedTailscale === true,
       tailscaleAuthKey: typeof settings.tailscaleAuthKey === 'string' ? settings.tailscaleAuthKey.trim() : '',
       tailscaleHostname: typeof settings.tailscaleHostname === 'string' ? settings.tailscaleHostname.trim() : '',

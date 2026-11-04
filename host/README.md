@@ -45,12 +45,13 @@ dsh plugin --profile desktop add dsh-mobile-bridge
 - 配对需要桌面面板里显示的 6 位码，120 秒有效；配对成功后手机持有长期 token，断线自动重连。
 - 所有请求要求 `Authorization: Bearer <token>`，token 和设置存在 `$DSH_HOME/mobile-bridge/state.json`。
 - 监听局域网和 tailnet 地址；插件只在本机开 HTTP/SSE，不对外上报数据。拿不到 token 的设备无法接入。
-- 审批与计划审阅都走 DSH 自己的请求通道：手机不在线或超时，请求回落到桌面客户端。
+- 审批与计划审阅都走 DSH 自己的请求通道：请求同时下发给手机和桌面端，谁先处理以谁为准；手机先答时会给桌面端那条已转发的 waterfall 事件下发 `cancel` 帧，桌面卡片自行撤掉。两端都没有时返回 `unavailable`，不会挂起。
+- 绑定组与协作：同一个手机配对过的多台主机可以组成一个组（`group.js`），组内用组密钥互相 `hello` 心跳，并能通过 `/api/collab/*` 读对端协作目录里的生成物；agent 侧配一个 `collab` 工具做委派（`tool.js` + `collab.js`）。
 
 ## 验证
 
 ```powershell
-node --test            # 26 个测试：auth / approvals / discovery / dto / endpoints / server
+node --test            # 62 个测试：auth / approvals / discovery / dto / endpoints / group / collab / server
 node scripts/check.mjs # 语法与导出检查
 dsh --profile desktop --dump-config | Select-String mobile-bridge
 ```

@@ -39,6 +39,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,7 @@ import com.ts7.dshremote.data.AppState
 import com.ts7.dshremote.data.ConnectionState
 import com.ts7.dshremote.data.EmbeddedTailscale
 import com.ts7.dshremote.data.Endpoints
+import com.ts7.dshremote.data.GroupInfo
 import com.ts7.dshremote.data.HostSummary
 import com.ts7.dshremote.notify.Alerts
 import com.ts7.dshremote.notify.KeepAlive
@@ -72,6 +74,7 @@ import com.ts7.dshremote.ui.theme.Outline
 import com.ts7.dshremote.ui.theme.SurfaceRaised
 import com.ts7.dshremote.ui.theme.TextMuted
 import com.ts7.dshremote.ui.theme.TextPrimary
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen(
@@ -83,7 +86,8 @@ fun SettingsScreen(
     onPairNew: () -> Unit,
     onForgetHost: (String) -> Unit,
     onAddEndpoint: (String, String) -> Result<Unit>,
-    onApprovals: () -> Unit
+    onApprovals: () -> Unit,
+    onLinkGroup: suspend () -> String?
 ) {
     var forgetTarget by remember { mutableStateOf<HostSummary?>(null) }
     var endpointDialog by remember { mutableStateOf(false) }
@@ -159,6 +163,9 @@ fun SettingsScreen(
                     Spacer(Modifier.width(8.dp))
                     Text("添加另一台主机", color = Amber)
                 }
+
+                Spacer(Modifier.height(8.dp))
+                GroupCard(state = state, onLink = onLinkGroup)
 
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -540,6 +547,91 @@ private fun HostRow(
         }
         IconButton(onClick = onForget) {
             Icon(Icons.Outlined.LinkOff, contentDescription = "移除", tint = Danger, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
+private fun GroupCard(state: AppState, onLink: suspend () -> String?) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val group: GroupInfo? = state.group
+    val peers = group?.peers.orEmpty()
+    val online = peers.count { it.status == "online" }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(SurfaceRaised, RoundedCornerShape(18.dp))
+            .padding(16.dp)
+    ) {
+        Text("协作组", style = MaterialTheme.typography.titleMedium, color = TextPrimary)
+        Text(
+            when {
+                group?.group == null -> "同一个手机绑定过的电脑可以互派任务：慢机器出需求，性能好的机器跑本地模型。"
+                else -> "${group.group.name} · ${peers.size} 台已入组，${online} 台在线"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        peers.forEach { peer ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StatusDot(if (peer.status == "online") Amber else TextMuted, 8)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        peer.name.ifBlank { peer.baseUrl },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary
+                    )
+                    Text(
+                        peer.collabRoot?.takeIf { it.isNotBlank() }
+                            ?: "${peer.baseUrl} · 未设置协作目录",
+                        style = MonoText,
+                        color = TextMuted
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = {
+                if (busy) return@OutlinedButton
+                busy = true
+                message = null
+                scope.launch {
+                    val result = runCatching { onLink() }.getOrElse { error ->
+                        error.message?.takeIf { it.isNotBlank() } ?: "组队失败"
+                    }
+                    message = result ?: "已把 ${state.hosts.size} 台主机连成协作组"
+                    busy = false
+                }
+            },
+            enabled = !busy && state.hosts.size > 1,
+            modifier = Modifier.fillMaxWidth().height(46.dp),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Text(
+                when {
+                    busy -> "正在组队…"
+                    state.hosts.size <= 1 -> "先配对第二台电脑"
+                    else -> "把已配对的主机连成协作组"
+                },
+                color = if (state.hosts.size > 1) Amber else TextMuted
+            )
+        }
+        message?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (it.startsWith("已")) TextMuted else Danger,
+                modifier = Modifier.padding(top = 8.dp)
+            )
         }
     }
 }

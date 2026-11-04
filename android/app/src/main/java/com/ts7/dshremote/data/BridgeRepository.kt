@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +36,12 @@ class BridgeRepository(
     companion object {
         /** 会话目录兜底工作区的 id 前缀；创建任务时拆出来走 cwd 参数。 */
         const val CWD_PREFIX = "cwd:"
+
+        /** 流式事件合并节拍：60ms 约等于 16fps，肉眼看是连续的，重组次数降一个量级。 */
+        private const val SYNC_COALESCE_MS = 60L
+
+        /** 打开会话后顺手刷列表的新鲜度阈值，避免每次点开会话都多跑两个请求。 */
+        private const val SESSION_REFRESH_FRESH_MS = 3_000L
     }
 
     private val appContext = context.applicationContext
@@ -73,6 +80,9 @@ class BridgeRepository(
         var activeSessionId: String? = null
         var pendingOpenSessionId: String? = null
         var detail: SessionDetail? = null
+
+        /** 上一次真正从 host 拉到的详情，重进会话时先拿它铺屏。 */
+        var lastDetail: SessionDetail? = null
         var timeline: List<TimelineItem> = emptyList()
         var streamText: String = ""
         var busy: Boolean = false
@@ -80,6 +90,11 @@ class BridgeRepository(
         var notice: String? = null
         var assistantTexts: MutableMap<String, String> = mutableMapOf()
         var eventFailures: Int = 0
+        var sessionsRefreshing: Boolean = false
+        var pendingRefreshing: Boolean = false
+
+        /** 这台主机所在绑定组的状态，断连时保留上一次结果。 */
+        var group: GroupInfo? = null
 
         val pendingCount: Int get() = pending.approvals.size + pending.questions.size
         val label: String
@@ -93,6 +108,13 @@ class BridgeRepository(
     private var started = false
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var routeCheckJob: Job? = null
+
+    /**
+     * 流式事件（assistant.delta / session.event）一秒能来几十上百条，每条都重建一整个
+     * AppState 会把整屏重组的代价乘上事件数。合并成一个 60ms 的节拍再推给 UI。
+     */
+    private var syncSoonJob: Job? = null
+    private val syncGuard = Any()
 
     private data class OpenedEndpoint(
         val client: BridgeClient,
@@ -440,11 +462,20 @@ class BridgeRepository(
     fun refreshSessions(hostId: String? = activeId) {
         val runtime = hostId?.let { runtimes[it] } ?: return
         val client = runtime.client ?: return
+        if (runtime.sessionsRefreshing) return
+        runtime.sessionsRefreshing = true
         scope.launch {
-            runCatching { client.sessions() }.onSuccess { sessions ->
-                if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
-                runtime.sessions = sort(sessions)
-                sync()
+            try {
+                runCatching { client.sessions() }.onSuccess { sessions ->
+                    if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
+                    val next = sort(sessions)
+                    // 结构相等就不推新列表，省掉整页工作区分组的重算。
+                    if (next == runtime.sessions) return@onSuccess
+                    runtime.sessions = next
+                    sync()
+                }
+            } finally {
+                runtime.sessionsRefreshing = false
             }
         }
     }
@@ -452,11 +483,18 @@ class BridgeRepository(
     fun refreshPending(hostId: String? = activeId) {
         val runtime = hostId?.let { runtimes[it] } ?: return
         val client = runtime.client ?: return
+        if (runtime.pendingRefreshing) return
+        runtime.pendingRefreshing = true
         scope.launch {
-            runCatching { client.pending() }.onSuccess { pending ->
-                if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
-                runtime.pending = pending
-                sync()
+            try {
+                runCatching { client.pending() }.onSuccess { pending ->
+                    if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
+                    if (pending == runtime.pending) return@onSuccess
+                    runtime.pending = pending
+                    sync()
+                }
+            } finally {
+                runtime.pendingRefreshing = false
             }
         }
     }
@@ -745,6 +783,7 @@ class BridgeRepository(
         refreshWorkspaces(runtime)
         refreshPresets(runtime)
         refreshPending(runtime.profile.id)
+        refreshGroup(runtime.profile.id)
 
         val queued = runtime.pendingOpenSessionId
         runtime.pendingOpenSessionId = null
@@ -800,10 +839,13 @@ class BridgeRepository(
     private fun openSessionInternal(runtime: Runtime, id: String) {
         if (runtime.activeSessionId == id && (runtime.busy || runtime.detail != null)) return
         runtime.activeSessionId = id
-        runtime.detail = null
-        runtime.timeline = emptyList()
+        // 回到刚看过的会话时先用上次的详情铺屏，再让请求把内容补齐，
+        // 避免每次点开都先空一屏等网络。
+        val cached = runtime.lastDetail?.takeIf { it.session.id == id }
+        runtime.detail = cached
+        runtime.timeline = cached?.records.orEmpty()
         runtime.streamText = ""
-        runtime.busy = true
+        runtime.busy = cached == null
         runtime.error = null
         val client = runtime.client
         if (client == null) {
@@ -819,11 +861,16 @@ class BridgeRepository(
     private fun loadSession(runtime: Runtime, client: BridgeClient, id: String) {
         scope.launch {
             runCatching {
-                client.subscribe(id)
-                client.session(id)
+                // subscribe 只是让 host 开始跟随这个会话，失败不该挡住历史加载，
+                // 所以和 session() 并行发出去。
+                coroutineScope {
+                    launch { runCatching { client.subscribe(id) } }
+                    client.session(id)
+                }
             }.onSuccess { detail ->
                 if (runtime.activeSessionId != id) return@onSuccess
                 runtime.detail = detail
+                runtime.lastDetail = detail
                 runtime.timeline = detail.records
                 runtime.pending = mergePending(runtime.pending, detail.pending)
                 runtime.busy = false
@@ -831,8 +878,13 @@ class BridgeRepository(
                     runtime.assistantTexts[id] = it.take(4_000)
                 }
                 sync()
-                refreshSessions(runtime.profile.id)
-                refreshPending(runtime.profile.id)
+                // 打开会话时不再无条件补两个请求：摘要已在列表里且不比 detail 旧就跳过，
+                // 待办队列只在本地还留着旧卡片时才对齐一次。
+                val summary = runtime.sessions.firstOrNull { it.id == id }
+                if (summary == null || (detail.session.updatedAt ?: 0L) > (summary.updatedAt ?: 0L)) {
+                    refreshSessions(runtime.profile.id)
+                }
+                if (runtime.pendingCount > 0) refreshPending(runtime.profile.id)
             }.onFailure { error ->
                 if (runtime.activeSessionId == id) {
                     runtime.busy = false
@@ -885,6 +937,79 @@ class BridgeRepository(
         }
     }
 
+    /** 拉这台主机的绑定组状态；失败时保留上一次结果。 */
+    fun refreshGroup(hostId: String? = activeId) {
+        val runtime = hostId?.let { runtimes[it] } ?: return
+        val client = runtime.client ?: return
+        scope.launch {
+            runCatching { client.group() }.onSuccess { group ->
+                if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
+                if (runtime.group != group) {
+                    runtime.group = group
+                    sync()
+                }
+            }
+        }
+    }
+
+    /**
+     * 把同一部手机绑定过的其它主机全部拉进当前主机所在的绑定组：
+     * 先向当前主机要一次性邀请码，再让每台其它主机带着这个码加入当前主机。
+     * 返回 null 表示成功，否则是给用户看的错误文案。
+     */
+    suspend fun linkGroup(): String? {
+        val hub = activeRuntime() ?: return "还没有连上任何主机"
+        val hubClient = hub.client ?: return "当前主机未连接"
+        val invite = runCatching { hubClient.groupInvite() }
+            .getOrElse { error ->
+                return error.message?.takeIf { it.isNotBlank() } ?: "无法创建绑定组"
+            }
+        val code = invite.invite?.code
+        if (code.isNullOrBlank()) return "邀请码生成失败，请稍后重试"
+        invite.group?.let { hub.group = hub.group?.copy(group = it) ?: GroupInfo(group = it) }
+
+        val targets = runtimes.values.filter { it.profile.id != hub.profile.id }
+        if (targets.isEmpty()) {
+            refreshGroup(hub.profile.id)
+            sync()
+            return "只有一台已配对主机，先把其它电脑也配对到这个手机"
+        }
+        var joined = 0
+        var firstFailure: String? = null
+        for (runtime in targets) {
+            val profile = runtime.profile
+            val outcome = runCatching {
+                // 走这条主机自己的端点口径（tailnet 地址经内嵌节点回环代理），
+                // selfBaseUrl 交给对端自己填局域网地址：手机保存的地址可能是
+                // 127.0.0.1 的代理端口，别的电脑连不上。
+                val endpoint = BridgeEndpoint(kind = runtime.endpointKind ?: Endpoints.LAN, url = profile.baseUrl)
+                clientFor(endpoint, profile.token, timeoutMs = 20_000L).groupLink(
+                    peerBaseUrl = hub.profile.baseUrl,
+                    code = code,
+                    selfBaseUrl = null
+                )
+            }
+            outcome.onSuccess { info ->
+                runtime.group = info
+                joined += 1
+            }
+            outcome.onFailure { error ->
+                if (firstFailure == null) {
+                    val label = profile.hostName?.takeIf { it.isNotBlank() } ?: profile.baseUrl
+                    firstFailure = "$label 加入失败：${error.message?.takeIf { it.isNotBlank() } ?: "网络不可达"}"
+                }
+            }
+        }
+        refreshGroup(hub.profile.id)
+        sync()
+        val failure = firstFailure
+        return when {
+            joined == 0 -> failure ?: "没有主机加入成功"
+            failure != null -> "已加入 $joined 台，$failure"
+            else -> null
+        }
+    }
+
     private fun handleEvent(runtime: Runtime, event: SseEvent) {
         try {
             when (event.name) {
@@ -910,7 +1035,7 @@ class BridgeRepository(
                     envelope.records.lastOrNull { it.kind == "assistant" }?.text?.let {
                         runtime.assistantTexts[envelope.sessionId] = it.take(4_000)
                     }
-                    sync()
+                    syncSoon()
                 }
                 "session.event" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionEventEnvelope.serializer(), event.data)
@@ -924,7 +1049,7 @@ class BridgeRepository(
                         }
                     }
                     if (runtime.activeSessionId != envelope.sessionId) {
-                        sync()
+                        syncSoon()
                         return
                     }
                     val timeline = if (timelineContains(runtime.timeline, item.seq)) {
@@ -942,7 +1067,7 @@ class BridgeRepository(
                         detail.copy(session = detail.session.copy(running = running))
                     }
                     if (item.kind == "turn" && item.phase == "end") runtime.streamText = ""
-                    sync()
+                    syncSoon()
                 }
                 "assistant.delta" -> {
                     val envelope = JsonConfig.json.decodeFromString(DeltaEnvelope.serializer(), event.data)
@@ -951,7 +1076,7 @@ class BridgeRepository(
                     val text = item.text ?: return
                     if (runtime.activeSessionId != envelope.sessionId) return
                     runtime.streamText = (runtime.streamText + text).takeLast(12_000)
-                    sync()
+                    syncSoon()
                 }
                 "session.added", "session.updated" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionEnvelope.serializer(), event.data)
@@ -959,7 +1084,7 @@ class BridgeRepository(
                     runtime.detail = runtime.detail?.let {
                         if (it.session.id == envelope.session.id) it.copy(session = envelope.session) else it
                     }
-                    sync()
+                    syncSoon()
                 }
                 "session.status" -> {
                     val envelope = JsonConfig.json.decodeFromString(StatusEnvelope.serializer(), event.data)
@@ -981,14 +1106,14 @@ class BridgeRepository(
                     if (!envelope.running && runtime.activeSessionId == envelope.sessionId) {
                         runtime.streamText = ""
                     }
-                    sync()
+                    syncSoon()
                 }
                 "session.activity" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionIdEnvelope.serializer(), event.data)
                     runtime.sessions = sort(runtime.sessions.map {
                         if (it.id == envelope.sessionId) it.copy(updatedAt = envelope.updatedAt) else it
                     })
-                    sync()
+                    syncSoon()
                 }
                 "session.removed" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionIdEnvelope.serializer(), event.data)
@@ -1083,6 +1208,22 @@ class BridgeRepository(
         HostStore.save(appContext, runtimes.values.map { it.profile })
     }
 
+    /**
+     * 高频事件用的合并刷新：同一节拍里只建一次 AppState。
+     *
+     * 结构化变化（切换会话、连接状态、待办卡片）仍然走 [sync] 立即上屏，
+     * 只有逐条吐字的流式帧和会话列表刷新走这里。
+     */
+    private fun syncSoon() {
+        synchronized(syncGuard) {
+            if (syncSoonJob?.isActive == true) return
+            syncSoonJob = scope.launch {
+                delay(SYNC_COALESCE_MS)
+                sync()
+            }
+        }
+    }
+
     private fun sync() {
         if (activeId == null || !runtimes.containsKey(activeId)) {
             activeId = runtimes.keys.lastOrNull()
@@ -1135,6 +1276,7 @@ class BridgeRepository(
             error = active?.error,
             notice = active?.notice,
             restored = started,
+            group = active?.group,
             hosts = hosts,
             pendingHosts = pendingHosts
         )

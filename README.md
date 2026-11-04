@@ -1,4 +1,4 @@
-# TS7 DSH Remote
+﻿# TS7 DSH Remote
 
 在局域网或 Tailscale 网络中，用 Android 手机远程操作 DeepSeek Harness（DSH）的 host 插件 + 原生 App。
 
@@ -15,12 +15,14 @@
 - 图片：新建任务或继续任务时最多附带 4 张 PNG/JPEG/WebP/GIF，App 先压到长边 1600、单张 ≤ 3.5 MB；是否理解图片取决于当前 DSH 模型
 - 虚拟机自动发现：宿主机跑一个 UDP 中继，把手机的发现包转发给 NAT 虚拟机，手机不用再手填转发地址
 - 任务详情：默认只显示对话、轮次状态和错误，工具调用合并成一行摘要（如「执行 5 步 · Bash, Read」），点摘要或菜单「显示执行细节」才展开完整过程；流式回复、停止/重命名
-- 权限审批：手机优先弹出审批卡；允许一次/拒绝；无人接管时回退桌面
+- 选择与复制：消息气泡支持长按选中（系统选择手柄、复制/全选），菜单里多了「复制整段对话」，按 `[我]` / `[DSH]` / `· 工具` 分段输出纯文本
+- 权限审批：手机和桌面端**同时**弹出审批卡；哪一端先处理，就以那一端的结果为准，另一端的卡片随即消失（桌面端由 host 主动下发 cancel 帧撤卡）
 - 计划审阅：plan-review 卡片展示完整计划，批准后退出计划模式并继续执行
-- 普通提问：单选/多选/自定义回答
+- 普通提问：单选/多选/自定义回答，同样是双端同时下发、先答为准
 - 前台服务：保持所有主机的 SSE 连接；断线自动重连
 - 通知：审批、提问、任务完成；通知动作可直接允许/拒绝，多主机时标注主机名
 - 亮色 UI：浅色背景、DeepSeek 蓝强调色、自适应 Q 版鲸鱼图标
+- PC 协作组：同一个手机绑定过的电脑可以组成一个绑定组，组内直接互派任务（A 出需求，B 用性能跑本地模型出图），生成物只落在指定协作目录
 
 ## 架构
 
@@ -37,8 +39,10 @@ ctx.approval / ctx.userQuestions / ctx.commands
 ```
 
 - 手机端不实现 DSH 的 Typert 协议，只使用精简 JSON/SSE。
-- 审批通过 `approval/request` waterfall 抢占；只有在线手机且 `phoneFirst` 开启时接管。
-- 无人接管或超时：有桌面客户端时 `next()` 回退；没有桌面客户端时返回 `unavailable`，避免挂起。
+- 审批与提问改为双端同时下发：手机建卡片，同时把请求交给桌面端；两端各自回答，先到者定结果。
+- 手机先答时，host 直接终止已转发的远程 waterfall 事件（`cancel` 帧），桌面端卡片的 `request.signal` 被 abort 后自行撤卡，不需要打断工具调用。
+- 桌面端先答时，host 广播 `approval.closed` / `question.closed`（带 `answeredBy: 'desktop'`），手机卡片随即移除。
+- 手机超时或断连只关手机侧卡片；桌面端在线时继续等它的结果，没有桌面端才返回 `unavailable`。
 - 计划模式通过 agent 的 `/plan`、`/plan off` 命令切换；计划正文来自 `plan-review` 问题的 `intent.detail`，不依赖不可用的根 `planMode` 服务。
 
 ## 目录
@@ -88,7 +92,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.8.1.tgz（约 8.9 MB / 23 个文件，含 bin/tsnode-windows-amd64.exe）
+# → dist/dsh-mobile-bridge-0.8.2.tgz（约 8.9 MB / 23 个文件，含 bin/tsnode-windows-amd64.exe）
 ```
 
 包体积变大是因为从 0.8.0 起插件自带内嵌 Tailscale 节点程序；节点程序缺失时脚本只警告并提示先跑 `tools/build-tsnode.ps1`，但打包清单里缺它会直接失败。插件、APK 与 GitHub Release tag 现在用同一个版本号。
@@ -96,16 +100,16 @@ powershell -NoProfile -File tools/pack-plugin.ps1
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.1.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.2.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
 
-分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.1.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
+分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.2.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.8.1-debug.apk`。
+1. 安装 `dist/TS7-DSH-Remote-0.8.2-debug.apk`。
 2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
 3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`，并打开表单下方的「通过 Tailscale 连接」开关）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
@@ -186,6 +190,36 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-tsnode.ps1 -Goos
 
 - 如果卡片报 `Access is denied` / `open ...tailscaled.log.conf: Access is denied`，说明安全软件拦了新编译的未签名二进制写文件：把 `host\bin\tsnode-*.exe` 加进信任列表（360 安全卫士、火绒等都会如此），再点「重启节点」。
 
+## PC 协作组
+
+同一个手机绑定过的电脑可以组成一个绑定组，组内机器互相是「队友」，可以直接把活派给另一台机器，再用那台机器的本地模型、GPU 或它特有的环境干活。典型用法：A 电脑的 agent 负责主框架，需要 3D 模型资产，于是把「要什么风格的概念图」派给 B，B 用自己的本地图像生成模型出图，产物落在 B 指定工作区的文件夹里，A 再把路径拿回去继续做模型。
+
+怎么组队：
+
+1. 手机连好两台（或更多）电脑，设置页出现「协作组」卡片。
+2. 点「把已配对的主机连成协作组」。手机先向当前主机要一次性邀请码，再让其余每台主机带着这个码加入当前主机——所以不需要在每台电脑上手动输 IP 和邀请码。当前主机是枢纽，邀请码一次性、5 分钟过期。
+3. 组名、成员和在线状态会显示在卡片里；电脑端「手机远控」面板的「PC 绑定组」卡片能做同样的事（创建组、生成邀请码、把别人的邀请码贴进来加入、移出成员、退出组）。
+
+组内互派任务：
+
+- 每台电脑都要在面板里设一个「协作目录」（绝对路径）。派活时不指定 `workspace` 就用对端这个目录；也可以显式传对端上的绝对路径。
+- 组内主机共享一个组密钥（`dshg_…`），握手后互相 `hello` 心跳，90 秒没心跳记为离线。组密钥能调手机版 API（建会话、写 prompt、读历史），但**不能订阅 `/api/events`**，也不会被算成「手机在线」去抢审批。
+- 收图走 `GET /api/collab/files`（列目录里的图片/模型文件）和 `GET /api/collab/file`（取单个文件），只允许读协作目录内部，越界路径直接 403，单次最多 200 个文件、64 MB。
+
+组内 agent 用一个 `collab` 工具：
+
+| action | 作用 |
+| --- | --- |
+| `peers` | 列出组内主机、地址、在线状态、各自协作目录 |
+| `delegate` | 把 prompt 派给某台主机：在它的协作目录里新开会话、跑完、回传回复和新增文件 |
+| `status` | 查某次委派还在不在跑 |
+| `files` | 列对端协作目录里的生成物 |
+| `fetch` | 把对端某个文件取到本机指定路径 |
+
+`delegate` 默认最多等 240 秒（可传 `waitSeconds`，上限 900 秒），返回 `status: done | timeout | error` 和文件清单。生成的设计图只写在对端的协作目录里，不会被拉到别的工作区。
+
+
+
 ## 删除与过滤
 
 DSH 桌面端的“删除会话”只是把会话从工作区导航里移除/归档，`session-persistence-jsonl` 没有删除 API，日志会一直留在 `$DSH_HOME/sessions` 下。
@@ -246,7 +280,7 @@ npm run check
 npm test
 ```
 
-当前 27 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报。
+当前 62 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界、协作目录下的文件列举与越界拒绝、组内委派（含协作目录兜底与缺失时报错）。
 
 MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI、Q 版图标、过滤后的任务列表和 DSH 侧栏控制面板都实际跑过。
 
@@ -278,7 +312,15 @@ DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧�
 | GET | `/api/pending` | 全部待处理 |
 | POST | `/api/approvals/:id` | `{action:'allow-once'|'reject'}` |
 | POST | `/api/questions/:id` | `{answers:[{id,selected,custom?}]}` |
-| GET | `/api/events` | SSE |
+| GET | `/api/events` | SSE（组密钥 403） |
+| GET | `/api/group` | 绑定组状态：组、成员、邀请码、协作目录 |
+| POST | `/api/group/invite` | 手机向当前主机要一次性邀请码（无组时自动建组） |
+| POST | `/api/group/link` | 手机让另一台主机加入当前主机：`{peerBaseUrl,code,selfBaseUrl?}` |
+| POST | `/api/setup/group` | 面板操作：`create\|invite\|join\|leave\|forget\|refresh`（loopback + CSRF） |
+| POST | `/api/group/join` | 组内握手入口，用邀请码换组密钥（公开） |
+| POST | `/api/group/hello` | 组内心跳 + gossip，Bearer 组密钥 |
+| GET | `/api/collab/files?cwd&since` | 列协作目录里的生成物 |
+| GET | `/api/collab/file?cwd&path=` | 取单个文件（只读协作目录内部） |
 
 SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`、`session.added/updated/status/activity/removed/error`、`approval.requested/closed`、`question.requested/closed`、`notice`、`resync`。
 
@@ -286,6 +328,8 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 - 桥接绑定 `0.0.0.0`，不做公网端口映射或中继；远程访问只依赖 Tailscale 的 WireGuard 加密隧道，应用层仍是明文 HTTP。
 - token 是 `dshm_` + 32 字节随机数，服务端只存 SHA-256；撤销后立即失效。
+- 绑定组密钥是 `dshg_` + 32 字节随机数，同样只存 SHA-256；它只能用于组内握手和组内协作，可以调手机版内容 API，但读不到 `/api/events`、也不算「手机在线」。邀请码一次性、5 分钟过期、单码 5 次失败。
+- `/api/collab/file(s)` 只读指定协作目录内部（`..`、绝对路径、目录外软链一律 403），单次最多 200 个文件、64 MB。
 - 配对码 120 秒、单码 5 次失败、单 IP 每分钟 10 次。
 - 面板的 `/api/setup/*` 只允许 loopback；DSH 页面跨端口访问时校验 Origin，并保留 CSRF。
 - 状态文件：`$DSH_HOME/storages/mobile-bridge/state.json`，原子写，权限 600。
@@ -305,11 +349,13 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 - 内嵌节点目前只支持 arm64-v8a 和 x86_64 两种 ABI；32 位设备请改用系统 Tailscale。
 - 虚拟机自动发现依赖宿主机上的 `discovery-relay` 常驻；只做 TCP 端口转发时仍可手动填 `宿主机IP:转发端口`。
 - 工具参数/结果在手机上会截断（正文 4000 字、参数 800 字），用于展示而非完整导出。
+- 组内委派要求各机能互相直连（同一局域网或同一 tailnet）；跨 NAT 需要自己打通网络。协作目录必须是每台机器本地的绝对路径，组里不共享文件系统。
+- 组内成员之间是"信任对端"的关系：拿到组密钥的机器可以在这台机器上建会话并写 prompt。只把邀请码给自己人的机器。
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.8.1-debug.apk`
-- `dist/dsh-mobile-bridge-0.8.1.tgz`
+- `dist/TS7-DSH-Remote-0.8.2-debug.apk`
+- `dist/dsh-mobile-bridge-0.8.2.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `README.md`

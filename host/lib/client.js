@@ -97,6 +97,9 @@ body[data-ds-dark-theme] .dmb-setting .hint{color:#98A4B8}
 .dmb-alert{border-radius:10px;padding:10px 12px;font-size:12px;background:rgba(220,38,38,.08);color:#DC2626}
 .dmb-input{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}
 .dmb-input:focus-visible{outline:2px solid #4D6BFE;outline-offset:1px}
+.dmb-join{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-width:440px}
+.dmb-peer-url{font-size:11px;color:#667085;word-break:break-all}
+body[data-ds-dark-theme] .dmb-peer-url{color:#98A4B8}
 .dmb-tag{font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(127,127,127,.14);color:#667085;flex:none}
 .dmb-tag.ok{background:rgba(22,163,74,.14);color:#16A34A}
 .dmb-tag.warn{background:rgba(217,119,6,.16);color:#B45309}
@@ -176,6 +179,8 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const [tsDir, setTsDir] = useState("")
       const [tsKey, setTsKey] = useState("")
       const [tsOpen, setTsOpen] = useState(false)
+      const [groupUrl, setGroupUrl] = useState("")
+      const [groupCode, setGroupCode] = useState("")
 
       const load = useCallback(async () => {
         try {
@@ -191,6 +196,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
             approvalTimeoutMs: data.settings.approvalTimeoutMs || 120000,
             questionTimeoutMs: data.settings.questionTimeoutMs || 120000,
             planReviewTimeoutMs: data.settings.planReviewTimeoutMs || 180000,
+            collabRoot: data.settings.collabRoot || "",
           })
         } catch (cause) {
           setError(`${cause.message || "桥接未响应"}（${BASE}）`)
@@ -573,6 +579,174 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                 ),
               )
             : null,
+          snap
+            ? (() => {
+                const groupState = snap.group || { group: null, peers: [], invite: null }
+                const peers = Array.isArray(groupState.peers) ? groupState.peers : []
+                const invite = groupState.invite || null
+                const joined = Boolean(groupState.group)
+                return h(
+                  "div",
+                  { className: "dmb-card" },
+                  h("div", { className: "dmb-label", style: { marginBottom: 8 } }, "PC 绑定组"),
+                  h(
+                    "div",
+                    { className: "dmb-setting" },
+                    h(
+                      "div",
+                      { className: "grow" },
+                      h("div", { className: "name" }, joined ? groupState.group.name || "绑定组" : "还没有绑定组"),
+                      h(
+                        "div",
+                        { className: "hint" },
+                        joined
+                          ? `${groupState.group.id} · ${peers.length} 台协作 PC`
+                          : "把几台电脑绑到同一个组里，Agent 之间就能互相派活、交换产物文件。",
+                      ),
+                    ),
+                    joined
+                      ? h(
+                          "button",
+                          {
+                            className: "dmb-btn danger",
+                            disabled: busy !== "",
+                            onClick: async () => {
+                              if (!window.confirm("退出绑定组？本机将不再与其他 PC 协作。")) return
+                              await post("group-leave", "/api/setup/group", { action: "leave" })
+                            },
+                          },
+                          busy === "group-leave" ? "退出中…" : "退出",
+                        )
+                      : h(
+                          "button",
+                          {
+                            className: "dmb-btn primary",
+                            disabled: busy !== "",
+                            onClick: async () => {
+                              const result = await post("group-create", "/api/setup/group", { action: "create" })
+                              if (result) setSaved("绑定组已创建")
+                            },
+                          },
+                          busy === "group-create" ? "创建中…" : "创建组",
+                        ),
+                  ),
+                  joined
+                    ? h(
+                        "div",
+                        { className: "dmb-setting" },
+                        h(
+                          "div",
+                          { className: "grow" },
+                          h("div", { className: "name" }, invite ? `邀请码 ${formatCode(invite.code)}` : "邀请码"),
+                          h(
+                            "div",
+                            { className: "hint" },
+                            invite
+                              ? "在另一台 PC 的面板里选「加入绑定组」，填这台 PC 的地址和这个 6 位码。"
+                              : "生成一个一次性邀请码，让另一台 PC 加入这个组。",
+                          ),
+                        ),
+                        h(
+                          "button",
+                          {
+                            className: "dmb-btn",
+                            disabled: busy !== "",
+                            onClick: async () => {
+                              const result = await post("group-invite", "/api/setup/group", { action: "invite" })
+                              if (result) setSaved("邀请码已生成")
+                            },
+                          },
+                          busy === "group-invite" ? "生成中…" : invite ? "换一个" : "生成邀请码",
+                        ),
+                      )
+                    : null,
+                  joined
+                    ? h(
+                        "div",
+                        null,
+                        h("div", { className: "dmb-label", style: { marginTop: 14, marginBottom: 8 } }, "组内 PC"),
+                        h(
+                          "div",
+                          { className: "dmb-devices" },
+                          peers.length === 0
+                            ? h("div", { className: "dmb-empty" }, "还没有其他 PC 加入")
+                            : peers.map((peer) =>
+                                h(
+                                  "div",
+                                  { className: "dmb-device", key: peer.deviceId },
+                                  h("span", { className: "dmb-dot", style: { color: peer.status === "online" ? "#16A34A" : "#94A3B8" } }),
+                                  h(
+                                    "div",
+                                    { className: "grow" },
+                                    h("div", { className: "name" }, peer.name || peer.deviceId),
+                                    h("div", { className: "dmb-peer-url" }, `${peer.status === "online" ? "在线" : "离线"} · ${peer.baseUrl}`),
+                                  ),
+                                  h(
+                                    "button",
+                                    {
+                                      className: "dmb-btn",
+                                      disabled: busy !== "",
+                                      onClick: async () => {
+                                        if (!window.confirm(`把 ${peer.name || peer.deviceId} 移出绑定组？`)) return
+                                        await post("group-forget", "/api/setup/group", { action: "forget", deviceId: peer.deviceId })
+                                      },
+                                    },
+                                    "移出",
+                                  ),
+                                ),
+                              ),
+                        ),
+                      )
+                    : h(
+                        "div",
+                        { className: "dmb-setting" },
+                        h(
+                          "div",
+                          { className: "grow" },
+                          h("div", { className: "name" }, "加入别人的组"),
+                          h("div", { className: "hint" }, "填对方 PC 的地址和它面板上显示的邀请码。"),
+                          h(
+                            "div",
+                            { className: "dmb-join" },
+                            h("input", {
+                              className: "dmb-input",
+                              placeholder: "http://192.168.1.10:48123",
+                              value: groupUrl,
+                              onChange: (event) => setGroupUrl(event.target.value),
+                            }),
+                            h("input", {
+                              className: "dmb-input",
+                              placeholder: "6 位邀请码",
+                              value: groupCode,
+                              onChange: (event) => setGroupCode(event.target.value),
+                            }),
+                          ),
+                        ),
+                        h(
+                          "button",
+                          {
+                            className: "dmb-btn primary",
+                            disabled: busy !== "" || groupUrl.trim() === "" || groupCode.trim() === "",
+                            onClick: async () => {
+                              const result = await post("group-join", "/api/setup/group", {
+                                action: "join",
+                                baseUrl: groupUrl.trim(),
+                                code: groupCode.trim(),
+                              })
+                              if (result) {
+                                setGroupUrl("")
+                                setGroupCode("")
+                                setSaved("已加入绑定组")
+                              }
+                            },
+                          },
+                          busy === "group-join" ? "加入中…" : "加入",
+                        ),
+                      ),
+                  saved ? h("div", { className: "dmb-saved", style: { marginTop: 10 } }, saved) : null,
+                )
+              })()
+            : null,
           snap && form
             ? h(
                 "div",
@@ -607,6 +781,21 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                   { className: "dmb-setting" },
                   h("div", { className: "grow" }, h("div", { className: "name" }, "计划审阅等待"), h("div", { className: "hint" }, "秒；计划卡片的等待时间。")),
                   h("input", { className: "dmb-num", type: "number", min: 5, max: 600, value: Math.round(form.planReviewTimeoutMs / 1000), onChange: (event) => setForm({ ...form, planReviewTimeoutMs: Number(event.target.value) * 1000 }) }),
+                ),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h("div", { className: "grow" }, h("div", { className: "name" }, "协作目录"), h("div", { className: "hint" }, "组内协作时允许对端读写的工作区根目录；留空表示不限制。")),
+                  h(
+                    "div",
+                    { className: "dmb-join", style: { width: 260, marginTop: 0 } },
+                    h("input", {
+                      className: "dmb-input",
+                      placeholder: "F:\\collab",
+                      value: form.collabRoot,
+                      onChange: (event) => setForm({ ...form, collabRoot: event.target.value }),
+                    }),
+                  ),
                 ),
                 h(
                   "div",

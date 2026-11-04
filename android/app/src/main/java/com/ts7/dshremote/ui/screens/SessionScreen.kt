@@ -1,5 +1,6 @@
 package com.ts7.dshremote.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,6 +24,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.ArrowUpward
@@ -58,7 +60,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,7 +104,20 @@ fun SessionScreen(
     val session = state.activeSession
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val listState = rememberLazyListState()
+
+    /** 整段对话铺成纯文本：消息气泡支持长按选词，这个入口负责一键全量复制。 */
+    fun copyWholeConversation() {
+        val text = timelineToPlainText(state.timeline, state.streamText)
+        if (text.isBlank()) {
+            Toast.makeText(context, "还没有可复制的内容", Toast.LENGTH_SHORT).show()
+            return
+        }
+        clipboard.setText(AnnotatedString(text))
+        Toast.makeText(context, "已复制整段对话 ${text.length} 字", Toast.LENGTH_SHORT).show()
+    }
+
     var menuOpen by remember { mutableStateOf(false) }
     var showDetails by remember { mutableStateOf(SessionPrefs.showDetails(context)) }
     var expandedGroups by remember(session?.id) { mutableStateOf(emptySet<Long>()) }
@@ -194,6 +211,13 @@ fun SessionScreen(
                                 SessionPrefs.setShowDetails(context, showDetails)
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text("复制整段对话") },
+                            onClick = {
+                                menuOpen = false
+                                copyWholeConversation()
+                            }
+                        )
                         DropdownMenuItem(text = { Text("停止任务", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Stop })
                         DropdownMenuItem(text = { Text("彻底删除", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Delete })
                     }
@@ -240,12 +264,14 @@ fun SessionScreen(
                                 shape = RoundedCornerShape(18.dp),
                                 modifier = Modifier.widthIn(max = 320.dp)
                             ) {
-                                Text(
-                                    state.streamText + " ▍",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = TextPrimary,
-                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                                )
+                                SelectionContainer {
+                                    Text(
+                                        state.streamText + " ▍",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = TextPrimary,
+                                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -463,8 +489,7 @@ fun SessionScreen(
 }
 
 /** 简洁模式把相邻的工具调用/结果合并成一行摘要，其余消息原样展示。 */
-private sealed interface TimelineRowModel {
-    data class Single(val item: TimelineItem) : TimelineRowModel
+private sealed interface TimelineRowModel {    data class Single(val item: TimelineItem) : TimelineRowModel
     data class Tools(val items: List<TimelineItem>) : TimelineRowModel
 }
 
@@ -487,6 +512,34 @@ private fun buildTimelineRows(timeline: List<TimelineItem>, showDetails: Boolean
     }
     flush()
     return rows
+}
+
+/**
+ * 把整段对话铺成可复制的纯文本：用户/助手消息整段保留，工具调用与结果压成一行，
+ * 生成中的流式文本附在最后。手机上没有跨气泡框选的机制，这条通路负责全量复制。
+ */
+private fun timelineToPlainText(timeline: List<TimelineItem>, streamText: String): String {
+    val builder = StringBuilder()
+    timeline.forEach { item ->
+        val body = item.text.orEmpty().ifBlank { item.preview.orEmpty() }
+        when (item.kind) {
+            "user" -> builder.append("[我]\n").append(body).append("\n\n")
+            "assistant" -> builder.append("[DSH]\n").append(body).append("\n\n")
+            "tool-call" -> {
+                builder.append("· 工具 ").append(item.name ?: "tool")
+                if (body.isNotBlank()) builder.append("：").append(body.take(600))
+                builder.append('\n')
+            }
+            "tool-result" -> {
+                val result = (item.reason ?: body).take(600)
+                if (result.isNotBlank()) builder.append(result).append('\n')
+            }
+            "turn" -> builder.append(if (item.phase == "end") "—— 完成 ——\n" else "—— 运行中 ——\n")
+            else -> if (body.isNotBlank()) builder.append(body).append('\n')
+        }
+    }
+    if (streamText.isNotBlank()) builder.append("[DSH 生成中]\n").append(streamText).append('\n')
+    return builder.toString().trim()
 }
 
 @Composable
@@ -558,12 +611,15 @@ private fun TimelineRow(item: TimelineItem) {
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.widthIn(max = 320.dp)
             ) {
-                Text(
-                    item.text.orEmpty(),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = TextPrimary,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                )
+                // 长按气泡即可选词：SelectionContainer 给系统选择手柄和「复制/全选」菜单。
+                SelectionContainer {
+                    Text(
+                        item.text.orEmpty(),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
             }
         }
         "assistant" -> Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -572,12 +628,14 @@ private fun TimelineRow(item: TimelineItem) {
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.widthIn(max = 340.dp)
             ) {
-                Text(
-                    item.text.orEmpty() + if (item.interrupted) "\n\n[已中断]" else "",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = TextPrimary,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
-                )
+                SelectionContainer {
+                    Text(
+                        item.text.orEmpty() + if (item.interrupted) "\n\n[已中断]" else "",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                    )
+                }
             }
         }
         "tool-call" -> Row(
@@ -591,14 +649,16 @@ private fun TimelineRow(item: TimelineItem) {
         ) {
             Icon(Icons.Outlined.Terminal, contentDescription = null, tint = Amber, modifier = Modifier.size(15.dp))
             Spacer(Modifier.width(8.dp))
-            Column {
-                Text(
-                    item.name ?: "tool",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = Amber
-                )
-                if (!item.preview.isNullOrBlank()) {
-                    Text(item.preview, style = MonoText, color = TextMuted, maxLines = 5)
+            SelectionContainer {
+                Column {
+                    Text(
+                        item.name ?: "tool",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Amber
+                    )
+                    if (!item.preview.isNullOrBlank()) {
+                        Text(item.preview, style = MonoText, color = TextMuted, maxLines = 5)
+                    }
                 }
             }
         }
@@ -611,12 +671,14 @@ private fun TimelineRow(item: TimelineItem) {
                         .background(if (item.isError) Color(0xFFFFE9E9) else Color(0xFFF3F6F4), RoundedCornerShape(10.dp))
                         .padding(10.dp)
                 ) {
-                    Text(
-                        item.reason ?: item.text.orEmpty(),
-                        style = MonoText.copy(fontSize = MaterialTheme.typography.bodySmall.fontSize),
-                        color = if (item.isError) Danger else TextMuted,
-                        maxLines = 12
-                    )
+                    SelectionContainer {
+                        Text(
+                            item.reason ?: item.text.orEmpty(),
+                            style = MonoText.copy(fontSize = MaterialTheme.typography.bodySmall.fontSize),
+                            color = if (item.isError) Danger else TextMuted,
+                            maxLines = 12
+                        )
+                    }
                 }
             }
         }

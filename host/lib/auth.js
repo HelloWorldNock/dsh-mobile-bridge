@@ -201,6 +201,7 @@ export function createAuth({ state, save, settings, logger, now = () => Date.now
       const value = patch[key]
       if (Number.isFinite(value) && value >= 5_000 && value <= 600_000) settings[key] = Math.round(value)
     }
+    if (typeof patch.collabRoot === 'string') settings.collabRoot = patch.collabRoot.trim().slice(0, 400)
     persist()
     return { ...settings }
   }

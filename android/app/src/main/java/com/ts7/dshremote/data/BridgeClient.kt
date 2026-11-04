@@ -178,6 +178,23 @@ class BridgeClient(
 
     suspend fun pending(): PendingState = decode(request("GET", "/api/pending"))
 
+    suspend fun group(): GroupInfo = decode(request("GET", "/api/group"))
+
+    suspend fun groupInvite(): GroupInviteResponse = decode(request("POST", "/api/group/invite", "{}"))
+
+    suspend fun groupLink(peerBaseUrl: String, code: String, selfBaseUrl: String?): GroupInfo {
+        val body = buildString {
+            append('{')
+            append("\"peerBaseUrl\":${json.encodeToString(String.serializer(), peerBaseUrl)},")
+            append("\"code\":${json.encodeToString(String.serializer(), code)}")
+            if (selfBaseUrl != null) {
+                append(",\"selfBaseUrl\":${json.encodeToString(String.serializer(), selfBaseUrl)}")
+            }
+            append('}')
+        }
+        return decode(request("POST", "/api/group/link", body))
+    }
+
     suspend fun subscribe(id: String) {
         request("POST", "/api/subscribe", """{"sessionId":${json.encodeToString(String.serializer(), id)}}""")
     }

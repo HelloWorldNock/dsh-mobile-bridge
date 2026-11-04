@@ -119,7 +119,8 @@ fun AppRoot(repository: BridgeRepository) {
                 onPairNew = { nav.navigate("connect") },
                 onForgetHost = { id -> repository.forget(id) },
                 onAddEndpoint = { id, url -> repository.addEndpoint(id, url) },
-                onApprovals = { nav.navigate("approvals") }
+                onApprovals = { nav.navigate("approvals") },
+                onLinkGroup = { repository.linkGroup() }
             )
         }
     }

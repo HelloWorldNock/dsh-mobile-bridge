@@ -60,6 +60,7 @@ data class AppState(
     val error: String? = null,
     val notice: String? = null,
     val restored: Boolean = false,
+    val group: GroupInfo? = null,
     val hosts: List<HostSummary> = emptyList(),
     val pendingHosts: List<HostPending> = emptyList()
 ) {
