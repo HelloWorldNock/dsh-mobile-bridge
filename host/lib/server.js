@@ -431,8 +431,32 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     if (root === null) return
     const rel = relative(root, dir)
     if (rel !== '' && (rel.startsWith('..') || isAbsolute(rel))) {
-      throw new BridgeError('collab/forbidden', `协作目录必须位于 ${root} 之内`, 403)
+      throw new BridgeError('collab/forbidden', `协作工作区之外的目录不能读写：必须位于 ${root} 之内`, 403)
     }
+  }
+
+  /**
+   * 组密钥派来的任务只能落在协作工作区之内。
+   * 文件接口早就锁在协作目录里，如果建会话不锁，对端等于绕过白名单在任意目录跑 agent。
+   */
+  function assertPeerWorkspace(identity, request) {
+    if (identity?.kind !== 'peer') return
+    if (collabRoot() === null) return
+    if (typeof request.workspaceId === 'string' && request.workspaceId !== '') {
+      const found = workspaceList().find((workspace) => workspace?.id === request.workspaceId)
+      if (found === undefined || typeof found.path !== 'string' || found.path === '') {
+        throw new BridgeError('collab/forbidden', '协作工作区不存在，用 /api/workspaces 看对端有哪几个', 403)
+      }
+      assertInCollabRoot(resolve(found.path))
+      return
+    }
+    if (typeof request.cwd === 'string' && request.cwd !== '') assertInCollabRoot(resolve(request.cwd))
+  }
+
+  function assertPeerSession(identity, summary) {
+    if (identity?.kind !== 'peer') return
+    if (collabRoot() === null) return
+    if (typeof summary?.cwd === 'string' && summary.cwd !== '') assertInCollabRoot(resolve(summary.cwd))
   }
 
   async function setupState() {
@@ -819,6 +843,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         }
       }
       if (typeof body.agentPreset === 'string' && body.agentPreset !== '') request.agentPreset = body.agentPreset
+      if (continueId === '') assertPeerWorkspace(identity, request)
       const warnings = []
       const resumed = continueId !== ''
       let session
@@ -826,6 +851,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         const summary = await findSummary(continueId)
         if (summary === null) throw new BridgeError('session/not-found', '会话不存在', 404)
         if (summary.running) throw new BridgeError('session/active', '该会话正在运行，请等这一轮结束再派任务', 409)
+        assertPeerSession(identity, summary)
         session = { sessionId: continueId, agentPreset: null }
       } else {
         session = await ctx.sessionController.create(request)

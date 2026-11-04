@@ -15,6 +15,8 @@
 
 派出去的会话默认使用 `workspace-write` 权限，只在这个工作区里读写；`collab` 工具新增 `permission` 参数可改。
 
+组密钥派来的会话现在也被锁在协作工作区之内：`cwd` 落在工作区外面、或 `workspaceId` 根本不是本机工作区，一律 403。文件接口本来就锁了，建会话不锁等于让对端绕开白名单在任意目录跑 agent。手机自己派的会话不受这条限制。
+
 ## 2. 为什么图片协作任务会生成一堆会话
 
 截图里 7 条「ComfyUI 生成 DeepSeek Q版」只有一个真在干活。原因有三层：
@@ -38,14 +40,14 @@
 
 - `host/lib/state.js`：`settings.collabWorkspaceId`、peer 的 `collabWorkspaceId`。
 - `host/lib/auth.js`：`collabWorkspaceId` 落盘；`collabRoot` 非绝对路径直接 400。
-- `host/lib/server.js`：`collabWorkspace()`（工作区优先，其次绝对路径）、`/api/setup/state` 返回 `collabWorkspaceId` 与 `workspaces`、`POST /api/sessions` 支持 `sessionId` 续跑与 cwd→workspaceId 归位、prompt 失败清理会话；`purgeSession` / `discardSession` / `matchWorkspace`；DELETE 复用 `purgeSession`。
+- `host/lib/server.js`：`collabWorkspace()`（工作区优先，其次绝对路径）、`/api/setup/state` 返回 `collabWorkspaceId` 与 `workspaces`、`POST /api/sessions` 支持 `sessionId` 续跑与 cwd→workspaceId 归位、prompt 失败清理会话、组密钥派来的会话限制在协作工作区内（`assertPeerWorkspace` / `assertPeerSession`）；`purgeSession` / `discardSession` / `matchWorkspace`；DELETE 复用 `purgeSession`。
 - `host/lib/collab.js`：`delegate({ sessionId, permission })`，先查对端 `/api/workspaces` 决定用 `workspaceId` 还是 `cwd`，返回值增加 `workspaceId` / `resumed`。
 - `host/lib/tool.js`：`collab` 新增 `permission` 参数，`sessionId` 可用于续跑，超时提示带上续跑方法。
 - `host/lib/group.js`：`collabWorkspaceId` 随加入/心跳/gossip 同步。
 - `host/lib/client.js`：「协作目录」改为「协作工作区」（工作区下拉 + 绝对路径），新增 `.dmb-select` 样式。
 - Android：`GroupPeer` 增加 `collabWorkspaceId`；设置页对端工作区文案改为「协作工作区」。
 - 版本：`host/package.json` / `VERSION` → 0.8.4。
-- 测试：`npm run check` 16 个模块通过，`npm test` 79 个用例全通过（新增续跑、cwd 归位、派发失败清理、相对路径拒绝、workspaceId 派活、cwd 回退等用例）。
+- 测试：`npm run check` 16 个模块通过，`npm test` 80 个用例全通过（新增续跑、cwd 归位、派发失败清理、相对路径拒绝、workspaceId 派活、cwd 回退、组密钥越界拒绝等用例）。
 
 ## 升级注意
 
