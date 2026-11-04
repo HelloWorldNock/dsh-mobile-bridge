@@ -97,6 +97,7 @@ body[data-ds-dark-theme] .dmb-setting .hint{color:#98A4B8}
 .dmb-alert{border-radius:10px;padding:10px 12px;font-size:12px;background:rgba(220,38,38,.08);color:#DC2626}
 .dmb-input{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}
 .dmb-input:focus-visible{outline:2px solid #4D6BFE;outline-offset:1px}
+.dmb-select{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}
 .dmb-join{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-width:440px}
 .dmb-peer-url{font-size:11px;color:#667085;word-break:break-all}
 body[data-ds-dark-theme] .dmb-peer-url{color:#98A4B8}
@@ -222,6 +223,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
             approvalTimeoutMs: data.settings.approvalTimeoutMs || 120000,
             questionTimeoutMs: data.settings.questionTimeoutMs || 120000,
             planReviewTimeoutMs: data.settings.planReviewTimeoutMs || 180000,
+            collabWorkspaceId: data.settings.collabWorkspaceId || "",
             collabRoot: data.settings.collabRoot || "",
           })
         } catch (cause) {
@@ -838,15 +840,36 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                 h(
                   "div",
                   { className: "dmb-setting" },
-                  h("div", { className: "grow" }, h("div", { className: "name" }, "协作目录"), h("div", { className: "hint" }, "组内协作时允许对端读写的工作区根目录；留空表示不限制。")),
                   h(
                     "div",
-                    { className: "dmb-join", style: { width: 260, marginTop: 0 } },
+                    { className: "grow" },
+                    h("div", { className: "name" }, "协作工作区"),
+                    h("div", { className: "hint" }, "对端派过来的协作任务都在这个工作区里建会话，产物只写这里；不选则用下面手填的绝对路径，都留空表示跟随会话自己的 cwd。"),
+                  ),
+                  h(
+                    "div",
+                    { className: "dmb-join", style: { width: 300, marginTop: 0 } },
+                    h(
+                      "select",
+                      {
+                        className: "dmb-select",
+                        value: form.collabWorkspaceId,
+                        onChange: (event) => {
+                          const id = event.target.value
+                          const picked = (snap.workspaces || []).find((item) => item.id === id)
+                          setForm({ ...form, collabWorkspaceId: id, collabRoot: picked ? picked.path : form.collabRoot })
+                        },
+                      },
+                      h("option", { value: "" }, "不限定（使用下面的路径）"),
+                      (snap.workspaces || []).map((item) =>
+                        h("option", { key: item.id, value: item.id }, `${item.title || item.id} — ${item.path}`),
+                      ),
+                    ),
                     h("input", {
                       className: "dmb-input",
                       placeholder: "F:\\collab",
                       value: form.collabRoot,
-                      onChange: (event) => setForm({ ...form, collabRoot: event.target.value }),
+                      onChange: (event) => setForm({ ...form, collabWorkspaceId: "", collabRoot: event.target.value }),
                     }),
                   ),
                 ),

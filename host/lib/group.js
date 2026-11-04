@@ -89,6 +89,7 @@ export function createGroup({
       groupId: peer.groupId ?? null,
       version: peer.version ?? null,
       collabRoot: typeof peer.collabRoot === 'string' ? peer.collabRoot : null,
+      collabWorkspaceId: typeof peer.collabWorkspaceId === 'string' ? peer.collabWorkspaceId : null,
       addedAt: peer.addedAt,
       lastSeenAt: peer.lastSeenAt,
       status: stale ? 'offline' : 'online'
@@ -175,7 +176,7 @@ export function createGroup({
     return true
   }
 
-  function upsertPeer({ deviceId, name, baseUrl, version = null, groupId = null, collabRoot = null }) {
+  function upsertPeer({ deviceId, name, baseUrl, version = null, groupId = null, collabRoot = null, collabWorkspaceId = null }) {
     const id = cleanText(deviceId, 64)
     const url = normalizeBaseUrl(baseUrl)
     if (id === '' || url === null) throw new BridgeError('group/bad-peer', '缺少对端的设备标识或地址', 400)
@@ -187,6 +188,7 @@ export function createGroup({
       existing.groupId = groupId ?? state.group?.id ?? null
       existing.version = version
       if (typeof collabRoot === 'string') existing.collabRoot = collabRoot
+      if (typeof collabWorkspaceId === 'string') existing.collabWorkspaceId = collabWorkspaceId
       return existing
     }
     const peer = {
@@ -196,6 +198,7 @@ export function createGroup({
       groupId: groupId ?? state.group?.id ?? null,
       version,
       collabRoot: typeof collabRoot === 'string' ? collabRoot : null,
+      collabWorkspaceId: typeof collabWorkspaceId === 'string' ? collabWorkspaceId : null,
       addedAt: new Date(now()).toISOString(),
       lastSeenAt: null
     }
@@ -211,14 +214,18 @@ export function createGroup({
   }
 
   /** 对端用自己的邀请码加入：登记它，并把组密钥交给它。 */
-  function acceptJoin({ code, baseUrl, deviceId, name, version, collabRoot = null, selfCollabRoot = null }, ip) {
+  function acceptJoin(
+    { code, baseUrl, deviceId, name, version, collabRoot = null, collabWorkspaceId = null, selfCollabRoot = null, selfCollabWorkspaceId = null },
+    ip
+  ) {
     verifyInvite(code, ip)
     const peer = upsertPeer({
       deviceId,
       name,
       baseUrl: normalizeBaseUrl(baseUrl) ?? `http://${ip ?? '127.0.0.1'}:${resolvePort()}`,
       version,
-      collabRoot: typeof collabRoot === 'string' ? collabRoot : null
+      collabRoot: typeof collabRoot === 'string' ? collabRoot : null,
+      collabWorkspaceId: typeof collabWorkspaceId === 'string' ? collabWorkspaceId : null
     })
     peer.lastSeenAt = new Date(now()).toISOString()
     persist()
@@ -232,12 +239,14 @@ export function createGroup({
       port: resolvePort(),
       version: null,
       collabRoot: typeof selfCollabRoot === 'string' && selfCollabRoot !== '' ? selfCollabRoot : null,
+      collabWorkspaceId:
+        typeof selfCollabWorkspaceId === 'string' && selfCollabWorkspaceId !== '' ? selfCollabWorkspaceId : null,
       peers: state.peers.map(peerPublic)
     }
   }
 
   /** 本机拿着对端的邀请码加入别人的组。 */
-  async function joinRemote({ baseUrl, code, selfBaseUrl = null, collabRoot = null }) {
+  async function joinRemote({ baseUrl, code, selfBaseUrl = null, collabRoot = null, collabWorkspaceId = null }) {
     const target = normalizeBaseUrl(baseUrl)
     if (target === null) throw new BridgeError('group/bad-url', '请填写对端地址，例如 http://192.168.1.10:48123', 400)
     if (typeof fetchImpl !== 'function') throw new BridgeError('group/unavailable', '当前运行时不支持网络请求', 501)
@@ -252,7 +261,9 @@ export function createGroup({
           deviceId: state.deviceId,
           name: state.hostName,
           version: null,
-          collabRoot: typeof collabRoot === 'string' && collabRoot !== '' ? collabRoot : null
+          collabRoot: typeof collabRoot === 'string' && collabRoot !== '' ? collabRoot : null,
+          collabWorkspaceId:
+            typeof collabWorkspaceId === 'string' && collabWorkspaceId !== '' ? collabWorkspaceId : null
         }),
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
       })
@@ -280,7 +291,8 @@ export function createGroup({
       name: payload.hostName,
       baseUrl: target,
       version: payload.version ?? null,
-      collabRoot: typeof payload.collabRoot === 'string' ? payload.collabRoot : null
+      collabRoot: typeof payload.collabRoot === 'string' ? payload.collabRoot : null,
+      collabWorkspaceId: typeof payload.collabWorkspaceId === 'string' ? payload.collabWorkspaceId : null
     })
     for (const peer of Array.isArray(payload.peers) ? payload.peers : []) {
       if (peer?.deviceId === state.deviceId || peer?.deviceId === payload.deviceId) continue
@@ -291,7 +303,8 @@ export function createGroup({
           name: peer.name,
           baseUrl: peer.baseUrl,
           version: peer.version ?? null,
-          collabRoot: typeof peer.collabRoot === 'string' ? peer.collabRoot : null
+          collabRoot: typeof peer.collabRoot === 'string' ? peer.collabRoot : null,
+          collabWorkspaceId: typeof peer.collabWorkspaceId === 'string' ? peer.collabWorkspaceId : null
         })
       } catch {
         // 缺地址的 gossip 条目直接丢弃
@@ -342,6 +355,7 @@ export function createGroup({
           peer.lastSeenAt = new Date(now()).toISOString()
           if (typeof payload?.version === 'string') peer.version = payload.version
           if (typeof payload?.collabRoot === 'string') peer.collabRoot = payload.collabRoot
+          if (typeof payload?.collabWorkspaceId === 'string') peer.collabWorkspaceId = payload.collabWorkspaceId
           for (const other of Array.isArray(payload?.peers) ? payload.peers : []) {
             if (other?.deviceId === state.deviceId) continue
             if (state.peers.some((item) => item.deviceId === other?.deviceId)) continue
@@ -351,7 +365,8 @@ export function createGroup({
                 deviceId: other.deviceId,
                 name: other.name,
                 baseUrl: other.baseUrl,
-                collabRoot: typeof other.collabRoot === 'string' ? other.collabRoot : null
+                collabRoot: typeof other.collabRoot === 'string' ? other.collabRoot : null,
+                collabWorkspaceId: typeof other.collabWorkspaceId === 'string' ? other.collabWorkspaceId : null
               })
             } catch {
               // 忽略不合法的 gossip 条目

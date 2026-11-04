@@ -285,6 +285,7 @@ data class GroupPeer(
     val groupId: String? = null,
     val version: String? = null,
     val collabRoot: String? = null,
+    val collabWorkspaceId: String? = null,
     val status: String = "offline"
 )
 

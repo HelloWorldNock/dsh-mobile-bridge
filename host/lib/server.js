@@ -288,6 +288,53 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     return items.find((item) => item.id === sessionId) ?? null
   }
 
+  /** 把会话从工作区里摘掉并删除落盘文件；返回被删掉的目录列表。 */
+  async function purgeSession(sessionId) {
+    const registry = ctx.workspaceRegistry
+    if (typeof registry?.list === 'function') {
+      try {
+        await registry.unarchiveSession?.(sessionId)
+      } catch {
+        // not archived
+      }
+      for (const workspace of registry.list()) {
+        try {
+          await workspace.detachSession(sessionId)
+        } catch {
+          // not a member of this workspace
+        }
+      }
+    }
+    return await removeSessionFiles(sessionId)
+  }
+
+  /** 派发失败后清掉刚建的会话；清不掉（还驻留在内存里）就返回 false，让调用方如实报告。 */
+  async function discardSession(sessionId) {
+    try {
+      await purgeSession(sessionId)
+      return (await findSummary(sessionId)) === null
+    } catch {
+      return false
+    }
+  }
+
+  function samePath(left, right) {
+    const a = resolve(left)
+    const b = resolve(right)
+    return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+  }
+
+  /** cwd 命中已登记的工作区时，让会话挂到那个工作区，而不是落到「未分组」。 */
+  function matchWorkspace(dir) {
+    if (typeof dir !== 'string' || dir.trim() === '') return null
+    const target = resolve(dir.trim())
+    for (const workspace of workspaceList()) {
+      if (typeof workspace?.path !== 'string' || workspace.path === '') continue
+      if (samePath(workspace.path, target)) return workspace
+    }
+    return null
+  }
+
   async function removeSessionFiles(sessionId) {
     const root = join(resolveDshHome(), 'sessions')
     const removed = []
@@ -345,10 +392,38 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
   }
 
+  function workspaceList() {
+    const registry = ctx.workspaceRegistry
+    if (typeof registry?.list !== 'function') return []
+    try {
+      return registry.list()
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * 协作工作区：优先用面板选中的 DSH 工作区（id 指向 registry 里的真实目录），
+   * 其次用绝对路径的协作目录。相对路径一律忽略——它会被 DSH 按进程 cwd 解析成
+   * profiles\desktop 下的临时目录，协作会话就跑出工作区了。
+   */
+  function collabWorkspace() {
+    const id = typeof settings.collabWorkspaceId === 'string' ? settings.collabWorkspaceId.trim() : ''
+    if (id !== '') {
+      const found = workspaceList().find((workspace) => workspace?.id === id)
+      if (found !== undefined && typeof found.path === 'string' && found.path !== '') {
+        return { id, path: resolve(found.path) }
+      }
+    }
+    const value = typeof settings.collabRoot === 'string' ? settings.collabRoot.trim() : ''
+    if (value !== '' && isAbsolute(value)) return { id: null, path: resolve(value) }
+    return null
+  }
+
   /** 协作目录白名单：为空表示不限，设了就把对端可写/可读的目录锁在根下。 */
   function collabRoot() {
-    const value = typeof settings.collabRoot === 'string' ? settings.collabRoot.trim() : ''
-    return value === '' ? null : resolve(value)
+    const workspace = collabWorkspace()
+    return workspace === null ? null : workspace.path
   }
 
   function assertInCollabRoot(dir) {
@@ -372,7 +447,13 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       version,
       group: group?.snapshot?.() ?? { group: null, peers: [], invite: null },
       update: updater?.snapshot?.() ?? null,
-      collabRoot: collabRoot()
+      collabRoot: collabRoot(),
+      collabWorkspaceId: collabWorkspace()?.id ?? null,
+      workspaces: workspaceList().map((workspace) => ({
+        id: workspace.id,
+        title: typeof workspace.title === 'string' ? workspace.title : workspace.id,
+        path: typeof workspace.path === 'string' ? resolve(workspace.path) : ''
+      }))
     }
   }
 
@@ -508,7 +589,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         }
         if (action === 'join') {
           const selfBaseUrl = advertisedBaseUrl(body.baseUrl, body.selfBaseUrl)
-          sendJson(res, 200, await group.joinRemote({ baseUrl: body.baseUrl, code: body.code, selfBaseUrl, collabRoot: collabRoot() }))
+          sendJson(res, 200, await group.joinRemote({ baseUrl: body.baseUrl, code: body.code, selfBaseUrl, collabRoot: collabRoot(), collabWorkspaceId: collabWorkspace()?.id ?? null }))
           return
         }
         if (action === 'leave') {
@@ -574,7 +655,9 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
             name: body.name,
             version: typeof body.version === 'string' ? body.version : null,
             collabRoot: typeof body.collabRoot === 'string' ? body.collabRoot : null,
-            selfCollabRoot: collabRoot()
+            collabWorkspaceId: typeof body.collabWorkspaceId === 'string' ? body.collabWorkspaceId : null,
+            selfCollabRoot: collabRoot(),
+            selfCollabWorkspaceId: collabWorkspace()?.id ?? null
           },
           req.socket.remoteAddress
         )
@@ -596,6 +679,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         port: config.port,
         endpoints: allEndpoints(),
         collabRoot: collabRoot(),
+        collabWorkspaceId: collabWorkspace()?.id ?? null,
         peers: group.snapshot().peers
       })
       return
@@ -713,61 +797,84 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     if (method === 'POST' && path === '/api/sessions') {
       const body = await readJson(req)
       const request = {}
+      const continueId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+      if (continueId !== '') request.sessionId = continueId
       if (typeof body.workspaceId === 'string' && body.workspaceId !== '') request.workspaceId = body.workspaceId
       if (typeof body.cwd === 'string' && body.cwd !== '') request.cwd = body.cwd
       if (request.workspaceId !== undefined && request.cwd !== undefined) {
         throw new BridgeError('session/bad-request', 'workspaceId 与 cwd 只能二选一', 400)
       }
-      if (request.workspaceId === undefined && request.cwd === undefined) {
-        throw new BridgeError('session/bad-request', '需要 workspaceId 或 cwd', 400)
+      if (continueId !== '' && (request.workspaceId !== undefined || request.cwd !== undefined)) {
+        throw new BridgeError('session/bad-request', 'sessionId 与 workspaceId/cwd 只能二选一', 400)
+      }
+      if (continueId === '' && request.workspaceId === undefined && request.cwd === undefined) {
+        throw new BridgeError('session/bad-request', '需要 workspaceId、cwd 或 sessionId', 400)
+      }
+      // cwd 落在已登记的工作区里时改走 workspaceId：否则 DSH 会把会话挂到「未分组」。
+      if (continueId === '' && request.workspaceId === undefined) {
+        const matched = matchWorkspace(request.cwd)
+        if (matched !== null) {
+          request.workspaceId = matched.id
+          delete request.cwd
+        }
       }
       if (typeof body.agentPreset === 'string' && body.agentPreset !== '') request.agentPreset = body.agentPreset
-      const created = await ctx.sessionController.create(request)
       const warnings = []
+      const resumed = continueId !== ''
+      let session
+      if (resumed) {
+        const summary = await findSummary(continueId)
+        if (summary === null) throw new BridgeError('session/not-found', '会话不存在', 404)
+        if (summary.running) throw new BridgeError('session/active', '该会话正在运行，请等这一轮结束再派任务', 409)
+        session = { sessionId: continueId, agentPreset: null }
+      } else {
+        session = await ctx.sessionController.create(request)
+      }
+      const sessionId = session.sessionId
 
       if (typeof body.permission === 'string' && body.permission !== '') {
         try {
-          const session = service('sessions')?.get?.(created.sessionId)
-          if (session === undefined) throw new Error('session is not materialized yet')
-          service('permissionPresets')?.set?.(session, body.permission)
+          const loaded = service('sessions')?.get?.(sessionId)
+          if (loaded === undefined) throw new Error('session is not materialized yet')
+          service('permissionPresets')?.set?.(loaded, body.permission)
         } catch (error) {
           warnings.push(`permission: ${String(error?.message ?? error)}`)
         }
       }
       if (body.plan === true) {
         try {
-          const agent = await ensureAgent(created.sessionId)
+          const agent = await ensureAgent(sessionId)
           agentService(agent, 'planMode')?.set?.(agent, true)
         } catch (error) {
           warnings.push(`plan: ${String(error?.message ?? error)}`)
         }
       }
-      if (typeof body.prompt === 'string' && body.prompt.trim() !== '') {
-        const text = body.prompt.trim()
-        if (text.length > MAX_PROMPT_CHARS) throw new BridgeError('prompt/too-long', '内容过长', 400)
-        await ctx.sessionController.prompt(
-          {
-            requestId: randomUUID(),
-            sessionId: created.sessionId,
-            mode: body.mode === 'steer' ? 'steer' : 'queue',
-            content: promptContent(text, body.images),
-            clientTimeZone: validTimeZone(body.clientTimeZone)
-          },
-          new AbortController().signal
-        )
-      } else if (Array.isArray(body.images) && body.images.length > 0) {
-        await ctx.sessionController.prompt(
-          {
-            requestId: randomUUID(),
-            sessionId: created.sessionId,
-            mode: body.mode === 'steer' ? 'steer' : 'queue',
-            content: promptContent('', body.images),
-            clientTimeZone: validTimeZone(body.clientTimeZone)
-          },
-          new AbortController().signal
-        )
+      const text = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+      if (text.length > MAX_PROMPT_CHARS) throw new BridgeError('prompt/too-long', '内容过长', 400)
+      const hasPrompt = text !== '' || (Array.isArray(body.images) && body.images.length > 0)
+      if (hasPrompt) {
+        try {
+          await ctx.sessionController.prompt(
+            {
+              requestId: randomUUID(),
+              sessionId,
+              mode: body.mode === 'steer' ? 'steer' : 'queue',
+              content: promptContent(text, body.images),
+              clientTimeZone: validTimeZone(body.clientTimeZone)
+            },
+            new AbortController().signal
+          )
+        } catch (error) {
+          // 派发失败就别把一个空会话留在列表里——这是会话越堆越多的主要原因。
+          const discarded = resumed ? false : await discardSession(sessionId)
+          const hint = discarded
+            ? '（已清理这次刚建的会话）'
+            : `（会话 ${sessionId} 已保留，可以用 sessionId 续跑）`
+          const message = `${String(error?.message ?? error)}${hint}`
+          throw new BridgeError('session/prompt-failed', message, error instanceof BridgeError ? error.status : 500)
+        }
       }
-      sendJson(res, 200, { sessionId: created.sessionId, agentPreset: created.agentPreset ?? null, warnings })
+      sendJson(res, 200, { sessionId, agentPreset: session.agentPreset ?? null, resumed, warnings })
       return
     }
 
@@ -798,22 +905,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         if (summary.agentAvailable) {
           throw new BridgeError('session/loaded', '该会话仍驻留在 DSH 内存中，请重启 DSH 后再彻底删除', 409)
         }
-        const registry = ctx.workspaceRegistry
-        if (typeof registry?.list === 'function') {
-          try {
-            await registry.unarchiveSession?.(sessionId)
-          } catch {
-            // not archived
-          }
-          for (const workspace of registry.list()) {
-            try {
-              await workspace.detachSession(sessionId)
-            } catch {
-              // not a member of this workspace
-            }
-          }
-        }
-        const removed = await removeSessionFiles(sessionId)
+        const removed = await purgeSession(sessionId)
         broadcast.broadcast('session.removed', { sessionId })
         logger?.info?.(`[mobile-bridge] deleted session ${sessionId} (${removed.length} dirs)`)
         sendJson(res, 200, { deleted: true, filesRemoved: removed.length })

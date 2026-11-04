@@ -94,8 +94,8 @@ export function createCollab({ group, logger, fetchImpl = globalThis.fetch, now 
   }
 
   /**
-   * 协作目录：显式 workspace 优先；否则用对端自报的「协作目录」。
-   * 路径是对端机器上的路径，所以这里不做本机解析。
+   * 协作工作区：显式 workspace 优先；否则用对端自报的「协作工作区」。
+   * 路径是对端机器上的路径，所以这里只做绝对路径校验，不做本机解析。
    */
   async function resolveWorkspace(target, workspace) {
     const value = typeof workspace === 'string' ? workspace.trim() : ''
@@ -108,9 +108,25 @@ export function createCollab({ group, logger, fetchImpl = globalThis.fetch, now 
     if (typeof fresh.collabRoot === 'string' && fresh.collabRoot !== '') return fresh.collabRoot
     throw new BridgeError(
       'collab/bad-request',
-      `${target.name} 还没设置协作目录：给 workspace 传对端上的绝对路径，或在它对端面板里设置「协作目录」`,
+      `${target.name} 还没设置协作工作区：给 workspace 传对端上的绝对路径，或在它对端面板里设置「协作工作区」`,
       400
     )
+  }
+
+  /** 对端的 DSH 工作区清单；老版本对端没有这个接口，返回空表即可。 */
+  async function workspacesOf(target) {
+    try {
+      const payload = await call(target, '/api/workspaces')
+      return Array.isArray(payload?.workspaces) ? payload.workspaces : []
+    } catch (error) {
+      logger?.warn?.(`[mobile-bridge] collab workspace listing failed on ${target.name}: ${String(error?.message ?? error)}`)
+      return []
+    }
+  }
+
+  function sameRemotePath(left, right) {
+    const norm = (value) => String(value ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    return norm(left) === norm(right)
   }
 
   async function listPeers() {
@@ -125,35 +141,61 @@ export function createCollab({ group, logger, fetchImpl = globalThis.fetch, now 
     return { peer: target.name, workspace: dir, files: payload.files ?? [] }
   }
 
-  /** 把一个任务派给对端：在它的 workspace 目录里新建会话并等待回合结束。 */
-  async function delegate({ peer, workspace, prompt, waitMs = DEFAULT_WAIT_MS, pollMs = 2_000 }) {
+  /**
+   * 把一个任务派给对端：优先落在它的协作工作区里（新建会话或续跑指定会话），
+   * 等这一轮跑完再回收回复与产物清单。
+   */
+  async function delegate({
+    peer,
+    workspace,
+    prompt,
+    sessionId,
+    permission = 'workspace-write',
+    waitMs = DEFAULT_WAIT_MS,
+    pollMs = 2_000
+  }) {
     const target = requirePeer(peer)
     const dir = await resolveWorkspace(target, workspace)
     const text = typeof prompt === 'string' ? prompt.trim() : ''
     if (text === '') throw new BridgeError('collab/bad-request', 'prompt 不能为空', 400)
     if (text.length > MAX_PROMPT_CHARS) throw new BridgeError('collab/bad-request', 'prompt 过长', 400)
+    const resumeId = typeof sessionId === 'string' ? sessionId.trim() : ''
     const budget = clampWait(waitMs)
     const interval = Math.min(MAX_POLL_MS, Math.max(MIN_POLL_MS, Number.isFinite(pollMs) ? Math.round(pollMs) : 2_000))
     const startedAt = now()
 
-    const created = await call(target, '/api/sessions', {
-      method: 'POST',
-      body: { cwd: dir, prompt: text },
-      timeoutMs: 30_000
-    })
-    const sessionId = typeof created.sessionId === 'string' ? created.sessionId : ''
-    if (sessionId === '') throw new BridgeError('collab/peer-error', `${target.name} 没有返回会话 id`, 502)
-    logger?.info?.(`[mobile-bridge] collab delegated to ${target.name}: session ${sessionId} in ${dir}`)
+    // 对端把 cwd 换成 workspaceId 才不会落到「未分组」；老对端没有 /api/workspaces 时退回 cwd。
+    const matched = resumeId === '' ? (await workspacesOf(target)).find((item) => sameRemotePath(item?.path, dir)) : undefined
+    const body = { prompt: text }
+    if (resumeId !== '') body.sessionId = resumeId
+    else if (matched !== undefined) body.workspaceId = matched.id
+    else body.cwd = dir
+    if (typeof permission === 'string' && permission !== '') body.permission = permission
+
+    const created = await call(target, '/api/sessions', { method: 'POST', body, timeoutMs: 60_000 })
+    const runId = (typeof created.sessionId === 'string' ? created.sessionId : '') || resumeId
+    if (runId === '') throw new BridgeError('collab/peer-error', `${target.name} 没有返回会话 id`, 502)
+    logger?.info?.(`[mobile-bridge] collab delegated to ${target.name}: session ${runId} in ${dir}`)
 
     let detail = null
     let status = 'timeout'
     while (now() - startedAt < budget) {
       await sleep(interval)
       try {
-        detail = await call(target, `/api/sessions/${encodeURIComponent(sessionId)}`)
+        detail = await call(target, `/api/sessions/${encodeURIComponent(runId)}`)
       } catch (error) {
         status = 'error'
-        return { peer: target.name, sessionId, workspace: dir, status, reply: `轮询失败：${String(error?.message ?? error)}`, files: [], elapsedMs: now() - startedAt }
+        return {
+          peer: target.name,
+          sessionId: runId,
+          workspace: dir,
+          workspaceId: matched?.id ?? null,
+          resumed: resumeId !== '',
+          status,
+          reply: `轮询失败：${String(error?.message ?? error)}`,
+          files: [],
+          elapsedMs: now() - startedAt
+        }
       }
       if (detail?.session?.running !== true) {
         status = 'done'
@@ -172,8 +214,10 @@ export function createCollab({ group, logger, fetchImpl = globalThis.fetch, now 
     return {
       peer: target.name,
       peerId: target.deviceId,
-      sessionId,
+      sessionId: runId,
       workspace: dir,
+      workspaceId: matched?.id ?? null,
+      resumed: resumeId !== '',
       status,
       running: detail?.session?.running === true,
       reply: lastAssistantText(Array.isArray(detail?.records) ? detail.records : []),

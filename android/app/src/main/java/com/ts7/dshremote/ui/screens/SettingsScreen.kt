@@ -622,7 +622,7 @@ private fun GroupCard(state: AppState, onLink: suspend () -> String?) {
                     )
                     Text(
                         peer.collabRoot?.takeIf { it.isNotBlank() }
-                            ?: "${peer.baseUrl} · 未设置协作目录",
+                            ?: "${peer.baseUrl} · 未设置协作工作区",
                         style = MonoText,
                         color = TextMuted
                     )

@@ -22,7 +22,7 @@
 - 前台服务：保持所有主机的 SSE 连接；断线自动重连
 - 通知：审批、提问、任务完成；通知动作可直接允许/拒绝，多主机时标注主机名
 - 亮色 UI：浅色背景、DeepSeek 蓝强调色、自适应 Q 版鲸鱼图标
-- PC 协作组：同一个手机绑定过的电脑可以组成一个绑定组，组内直接互派任务（A 出需求，B 用性能跑本地模型出图），生成物只落在指定协作目录
+- PC 协作组：同一个手机绑定过的电脑可以组成一个绑定组，组内直接互派任务（A 出需求，B 用性能跑本地模型出图），生成物只落在指定的协作工作区
 
 ## 架构
 
@@ -203,21 +203,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-tsnode.ps1 -Goos
 
 组内互派任务：
 
-- 每台电脑都要在面板里设一个「协作目录」（绝对路径）。派活时不指定 `workspace` 就用对端这个目录；也可以显式传对端上的绝对路径。
+- 每台电脑都要在面板里设一个「协作工作区」：选一个已登记的 DSH 工作区（推荐，会话直接挂在它下面），或者手填一个绝对路径。派活时不指定 `workspace` 就用对端这个工作区；也可以显式传对端上的绝对路径。相对路径会被拒绝——旧版本按进程 cwd 解析，协作会话就跑出工作区了。
 - 组内主机共享一个组密钥（`dshg_…`），握手后互相 `hello` 心跳，90 秒没心跳记为离线。组密钥能调手机版 API（建会话、写 prompt、读历史），但**不能订阅 `/api/events`**，也不会被算成「手机在线」去抢审批。
-- 收图走 `GET /api/collab/files`（列目录里的图片/模型文件）和 `GET /api/collab/file`（取单个文件），只允许读协作目录内部，越界路径直接 403，单次最多 200 个文件、64 MB。
+- 收图走 `GET /api/collab/files`（列目录里的图片/模型文件）和 `GET /api/collab/file`（取单个文件），只允许读协作工作区内部，越界路径直接 403，单次最多 200 个文件、64 MB。
 
 组内 agent 用一个 `collab` 工具：
 
 | action | 作用 |
 | --- | --- |
-| `peers` | 列出组内主机、地址、在线状态、各自协作目录 |
-| `delegate` | 把 prompt 派给某台主机：在它的协作目录里新开会话、跑完、回传回复和新增文件 |
+| `peers` | 列出组内主机、地址、在线状态、各自协作工作区 |
+| `delegate` | 把 prompt 派给某台主机：在它的协作工作区里跑一轮（`sessionId` 可续跑已有会话），回传回复和新增文件 |
 | `status` | 查某次委派还在不在跑 |
-| `files` | 列对端协作目录里的生成物 |
+| `files` | 列对端协作工作区里的生成物 |
 | `fetch` | 把对端某个文件取到本机指定路径 |
 
-`delegate` 默认最多等 240 秒（可传 `waitSeconds`，上限 900 秒），返回 `status: done | timeout | error` 和文件清单。生成的设计图只写在对端的协作目录里，不会被拉到别的工作区。
+`delegate` 默认最多等 240 秒（可传 `waitSeconds`，上限 900 秒），返回 `status: done | timeout | error` 和文件清单。超时后可以带 `sessionId` 再调一次接着追，不会新建会话。派过去的会话默认 `workspace-write` 权限，只在这个工作区里读写（`permission` 参数可改）。生成的设计图只写在对端的协作工作区里，不会被拉到别的工作区。
 
 
 
@@ -281,7 +281,7 @@ npm run check
 npm test
 ```
 
-当前 62 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界、协作目录下的文件列举与越界拒绝、组内委派（含协作目录兜底与缺失时报错）。
+当前 79 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话（`sessionId` 续跑、cwd 归位工作区、派发失败清理空会话）、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界、协作工作区配置（相对路径拒绝）、协作工作区下的文件列举与越界拒绝、组内委派（workspaceId 优先、cwd 回退、续跑、并发权限、缺失时报错）。
 
 MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI、Q 版图标、过滤后的任务列表和 DSH 侧栏控制面板都实际跑过。
 
@@ -314,14 +314,14 @@ DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧�
 | POST | `/api/approvals/:id` | `{action:'allow-once'|'reject'}` |
 | POST | `/api/questions/:id` | `{answers:[{id,selected,custom?}]}` |
 | GET | `/api/events` | SSE（组密钥 403） |
-| GET | `/api/group` | 绑定组状态：组、成员、邀请码、协作目录 |
+| GET | `/api/group` | 绑定组状态：组、成员、邀请码、协作工作区 |
 | POST | `/api/group/invite` | 手机向当前主机要一次性邀请码（无组时自动建组） |
 | POST | `/api/group/link` | 手机让另一台主机加入当前主机：`{peerBaseUrl,code,selfBaseUrl?}` |
 | POST | `/api/setup/group` | 面板操作：`create\|invite\|join\|leave\|forget\|refresh`（loopback + CSRF） |
 | POST | `/api/group/join` | 组内握手入口，用邀请码换组密钥（公开） |
 | POST | `/api/group/hello` | 组内心跳 + gossip，Bearer 组密钥 |
-| GET | `/api/collab/files?cwd&since` | 列协作目录里的生成物 |
-| GET | `/api/collab/file?cwd&path=` | 取单个文件（只读协作目录内部） |
+| GET | `/api/collab/files?cwd&since` | 列协作工作区里的生成物 |
+| GET | `/api/collab/file?cwd&path=` | 取单个文件（只读协作工作区内部） |
 
 SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`、`session.added/updated/status/activity/removed/error`、`approval.requested/closed`、`question.requested/closed`、`notice`、`resync`。
 
@@ -330,7 +330,7 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 - 桥接绑定 `0.0.0.0`，不做公网端口映射或中继；远程访问只依赖 Tailscale 的 WireGuard 加密隧道，应用层仍是明文 HTTP。
 - token 是 `dshm_` + 32 字节随机数，服务端只存 SHA-256；撤销后立即失效。
 - 绑定组密钥是 `dshg_` + 32 字节随机数，同样只存 SHA-256；它只能用于组内握手和组内协作，可以调手机版内容 API，但读不到 `/api/events`、也不算「手机在线」。邀请码一次性、5 分钟过期、单码 5 次失败。
-- `/api/collab/file(s)` 只读指定协作目录内部（`..`、绝对路径、目录外软链一律 403），单次最多 200 个文件、64 MB。
+- `/api/collab/file(s)` 只读指定协作工作区内部（`..`、绝对路径、目录外软链一律 403），单次最多 200 个文件、64 MB。
 - 配对码 120 秒、单码 5 次失败、单 IP 每分钟 10 次。
 - 面板的 `/api/setup/*` 只允许 loopback；DSH 页面跨端口访问时校验 Origin，并保留 CSRF。
 - 状态文件：`$DSH_HOME/storages/mobile-bridge/state.json`，原子写，权限 600。
@@ -350,7 +350,7 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 - 内嵌节点目前只支持 arm64-v8a 和 x86_64 两种 ABI；32 位设备请改用系统 Tailscale。
 - 虚拟机自动发现依赖宿主机上的 `discovery-relay` 常驻；只做 TCP 端口转发时仍可手动填 `宿主机IP:转发端口`。
 - 工具参数/结果在手机上会截断（正文 4000 字、参数 800 字），用于展示而非完整导出。
-- 组内委派要求各机能互相直连（同一局域网或同一 tailnet）；跨 NAT 需要自己打通网络。协作目录必须是每台机器本地的绝对路径，组里不共享文件系统。
+- 组内委派要求各机能互相直连（同一局域网或同一 tailnet）；跨 NAT 需要自己打通网络。协作工作区必须是每台机器本地的绝对路径（推荐直接在面板里选已登记的 DSH 工作区），组里不共享文件系统。
 - 组内成员之间是"信任对端"的关系：拿到组密钥的机器可以在这台机器上建会话并写 prompt。只把邀请码给自己人的机器。
 
 ## 交付物

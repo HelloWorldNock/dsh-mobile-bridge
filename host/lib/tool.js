@@ -30,8 +30,8 @@ function renderValue(args, value) {
   if (action === 'peers') return renderPeers(value.peers)
   if (action === 'delegate' || action === 'status') {
     const lines = [
-      `${value.peer ?? '?'} 上的会话 ${value.sessionId ?? '?'}：${value.status ?? (value.running ? 'running' : 'idle')}`,
-      `工作区：${value.workspace ?? '(未记录)'}`,
+      `${value.peer ?? '?'} 上的会话 ${value.sessionId ?? '?'}：${value.status ?? (value.running ? 'running' : 'idle')}${value.resumed === true ? '（续跑已有会话）' : ''}`,
+      `工作区：${value.workspace ?? '(未记录)'}${value.workspaceId ? `（workspaceId ${value.workspaceId}）` : ''}`,
       `耗时：${Number.isFinite(value.elapsedMs) ? `${Math.round(value.elapsedMs / 1000)}s` : '?'}`,
       '',
       clip(value.reply ?? '')
@@ -41,6 +41,12 @@ function renderValue(args, value) {
     }
     if (value.running === true) {
       lines.push('', '任务还在跑，可以稍后用 action=status 查看，或 action=files 直接看产物。')
+    }
+    if (value.status === 'timeout') {
+      lines.push(
+        '',
+        `等待到点但任务没结束。用 action=delegate 配上 sessionId=${value.sessionId ?? '?'} 就能接着追它，不会再新建一个会话。`
+      )
     }
     return lines.join('\n')
   }
@@ -60,7 +66,7 @@ export function createCollabTool({ collab }) {
   return {
     name: 'collab',
     description:
-      '与绑定组里的其它 PC 协作。action=peers 列出组内节点及其在线状态；action=delegate 在指定 peer 的某个工作区目录里新建 DSH 会话并执行 prompt，等待回合结束后返回回复与新增产物文件；action=status 查询已派工会话的进度；action=files 列出对端工作区里指定时间之后新增的文件；action=fetch 把对端工作区里的文件下载到本机（saveAs 用绝对路径）。产物只会落在 workspace 指定的目录里。',
+      '与绑定组里的其它 PC 协作。action=peers 列出组内节点及其在线状态；action=delegate 在对端协作工作区里新建 DSH 会话（或续跑 sessionId 指定的会话）并执行 prompt，等待回合结束后返回回复与新增产物文件；action=status 查询已派工会话的进度；action=files 列出对端工作区里指定时间之后新增的文件；action=fetch 把对端工作区里的文件下载到本机（saveAs 用绝对路径）。会话默认以 workspace-write 权限跑在协作工作区里，产物只会落在该目录。',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -71,9 +77,17 @@ export function createCollabTool({ collab }) {
           description: '要执行的动作'
         },
         peer: { type: 'string', description: '目标 PC 的名字或 deviceId（action=peers 里能看到）' },
-        workspace: { type: 'string', description: '对端工作区目录的绝对路径；产物只会写在这里' },
+        workspace: { type: 'string', description: '对端工作区目录的绝对路径；省略则用对端面板里设置的协作工作区' },
         prompt: { type: 'string', description: '派给对端 Agent 的完整任务描述（action=delegate）' },
-        sessionId: { type: 'string', description: 'action=status 时的会话 id' },
+        sessionId: {
+          type: 'string',
+          description: 'action=status 时查询的会话 id；action=delegate 时改成续跑这个会话，不再新建'
+        },
+        permission: {
+          type: 'string',
+          enum: ['read-only', 'workspace-write', 'danger-full-access'],
+          description: 'action=delegate 的会话权限，默认 workspace-write（只在该工作区内读写）'
+        },
         waitSeconds: { type: 'number', description: 'action=delegate 最多等多少秒，默认 240，上限 900' },
         since: { type: 'number', description: 'action=files 的时间下界（毫秒时间戳），默认 0 表示全部' },
         path: { type: 'string', description: 'action=fetch 时对端工作区内的相对路径' },
@@ -95,6 +109,8 @@ export function createCollabTool({ collab }) {
           peer: args.peer,
           workspace: args.workspace,
           prompt: args.prompt,
+          sessionId: args.sessionId,
+          permission: args.permission,
           waitMs: Number.isFinite(args.waitSeconds) ? args.waitSeconds * 1_000 : undefined
         })
       }

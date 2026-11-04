@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
+import { isAbsolute } from 'node:path'
 
 export class BridgeError extends Error {
   constructor(code, message, status = 400) {
@@ -201,7 +202,15 @@ export function createAuth({ state, save, settings, logger, now = () => Date.now
       const value = patch[key]
       if (Number.isFinite(value) && value >= 5_000 && value <= 600_000) settings[key] = Math.round(value)
     }
-    if (typeof patch.collabRoot === 'string') settings.collabRoot = patch.collabRoot.trim().slice(0, 400)
+    if (typeof patch.collabWorkspaceId === 'string') settings.collabWorkspaceId = patch.collabWorkspaceId.trim().slice(0, 120)
+    if (typeof patch.collabRoot === 'string') {
+      const value = patch.collabRoot.trim().slice(0, 400)
+      // 相对路径会被 DSH 按进程工作目录解析，落到 profiles\desktop 下面，协作会话就跑出工作区了。
+      if (value !== '' && !isAbsolute(value)) {
+        throw new BridgeError('setup/bad-workspace', '协作工作区必须是绝对路径，例如 F:\\collab', 400)
+      }
+      settings.collabRoot = value
+    }
     persist()
     return { ...settings }
   }

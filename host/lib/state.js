@@ -47,6 +47,7 @@ export function createDefaultState() {
       approvalTimeoutMs: 120_000,
       questionTimeoutMs: 120_000,
       planReviewTimeoutMs: 180_000,
+      collabWorkspaceId: '',
       collabRoot: '',
       embeddedTailscale: false,
       tailscaleAuthKey: '',
@@ -98,6 +99,7 @@ function normalizeState(raw) {
             groupId: typeof p.groupId === 'string' ? p.groupId : null,
             version: typeof p.version === 'string' ? p.version : null,
             collabRoot: typeof p.collabRoot === 'string' ? p.collabRoot : null,
+            collabWorkspaceId: typeof p.collabWorkspaceId === 'string' ? p.collabWorkspaceId : null,
             addedAt: typeof p.addedAt === 'string' ? p.addedAt : new Date().toISOString(),
             lastSeenAt: typeof p.lastSeenAt === 'string' ? p.lastSeenAt : null
           }))
@@ -110,6 +112,7 @@ function normalizeState(raw) {
       planReviewTimeoutMs: Number.isFinite(settings.planReviewTimeoutMs)
         ? settings.planReviewTimeoutMs
         : base.settings.planReviewTimeoutMs,
+      collabWorkspaceId: typeof settings.collabWorkspaceId === 'string' ? settings.collabWorkspaceId.trim() : '',
       collabRoot: typeof settings.collabRoot === 'string' ? settings.collabRoot.trim() : '',
       embeddedTailscale: settings.embeddedTailscale === true,
       tailscaleAuthKey: typeof settings.tailscaleAuthKey === 'string' ? settings.tailscaleAuthKey.trim() : '',
