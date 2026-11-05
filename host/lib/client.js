@@ -208,6 +208,9 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const [tsOpen, setTsOpen] = useState(false)
       const [groupUrl, setGroupUrl] = useState("")
       const [groupCode, setGroupCode] = useState("")
+      const [logOpen, setLogOpen] = useState(false)
+      const [logText, setLogText] = useState("")
+      const [logBusy, setLogBusy] = useState(false)
 
       const load = useCallback(async () => {
         try {
@@ -313,6 +316,37 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       const checkUpdate = useCallback(async () => {
         await post("update", "/api/setup/update", { force: true })
       }, [post])
+
+      // 日志导出走 loopback 的 /api/setup/logs：PC 面板和桥接同机，不需要 token。
+      const loadLogs = useCallback(async () => {
+        setLogBusy(true)
+        try {
+          const response = await fetch(`${BASE}/api/setup/logs?lines=600`, { cache: "no-store" })
+          if (!response.ok) throw new Error(`HTTP ${response.status}`)
+          setLogText(await response.text())
+        } catch (cause) {
+          setLogText(`读取日志失败：${cause.message || cause}`)
+        } finally {
+          setLogBusy(false)
+        }
+      }, [])
+
+      const toggleLogs = useCallback(() => {
+        setLogOpen((open) => {
+          if (!open) void loadLogs()
+          return !open
+        })
+      }, [loadLogs])
+
+      const copyLogs = useCallback(async () => {
+        if (!navigator.clipboard) return
+        try {
+          await navigator.clipboard.writeText(logText)
+          setSaved("运行日志已复制")
+        } catch (_) {
+          setSaved("复制失败")
+        }
+      }, [logText])
 
       const copyEndpoint = useCallback(async (endpoint) => {
         if (!navigator.clipboard) return
@@ -897,6 +931,44 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                   h("button", { className: "dmb-btn primary", onClick: saveSettings, disabled: busy !== "" }, busy === "save" ? "保存中…" : "保存设置"),
                   saved ? h("span", { className: "dmb-saved" }, saved) : null,
                 ),
+              )
+            : null,
+          snap
+            ? h(
+                "div",
+                { className: "dmb-card" },
+                h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "运行日志"),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, "bridge.log"),
+                    h(
+                      "div",
+                      { className: "hint" },
+                      snap.logs?.path
+                        ? `手机连不上、审批不同步之类的怪问题，导出这个文件发出去就行：${snap.logs.path}`
+                        : "这次运行没有落盘（只保留在内存里），重启后清空。",
+                    ),
+                  ),
+                  h("button", { className: "dmb-btn", onClick: toggleLogs }, logOpen ? "收起日志" : "查看最近日志"),
+                  h(
+                    "a",
+                    { className: "dmb-btn primary", href: `${BASE}/api/setup/logs?lines=800`, download: "dsh-remote-host.log" },
+                    "导出日志文件",
+                  ),
+                ),
+                logOpen ? h("div", { className: "dmb-log" }, logBusy && !logText ? "读取中…" : logText || "（还没有日志）") : null,
+                logOpen
+                  ? h(
+                      "div",
+                      { className: "dmb-actions", style: { marginTop: 10 } },
+                      h("button", { className: "dmb-btn", onClick: copyLogs }, "复制全部"),
+                      h("button", { className: "dmb-btn", onClick: loadLogs, disabled: logBusy }, logBusy ? "读取中…" : "刷新"),
+                    )
+                  : null,
               )
             : null,
           snap

@@ -208,6 +208,10 @@ class BridgeClient(
 
     suspend fun pending(): PendingState = decode(request("GET", "/api/pending"))
 
+    /** 主机侧运行日志（环境头部 + 最近若干行），文本直接可以发给别人。 */
+    suspend fun logs(lines: Int = 400): HostLogBundle =
+        decode(request("GET", "/api/logs?format=json&lines=$lines"))
+
     suspend fun group(): GroupInfo = decode(request("GET", "/api/group"))
 
     suspend fun groupInvite(): GroupInviteResponse = decode(request("POST", "/api/group/invite", "{}"))

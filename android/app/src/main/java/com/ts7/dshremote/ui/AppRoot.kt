@@ -121,6 +121,7 @@ fun AppRoot(repository: BridgeRepository) {
                 onAddEndpoint = { id, url -> repository.addEndpoint(id, url) },
                 onApprovals = { nav.navigate("approvals") },
                 onLinkGroup = { repository.linkGroup() },
+                onCollectLogs = { repository.collectLogs() },
                 onCheckUpdate = { repository.checkUpdate() }
             )
         }

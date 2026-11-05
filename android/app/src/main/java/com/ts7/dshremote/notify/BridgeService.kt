@@ -17,6 +17,7 @@ import com.ts7.dshremote.DshApp
 import com.ts7.dshremote.data.BridgeRepository
 import com.ts7.dshremote.data.ConnectionState
 import com.ts7.dshremote.data.HostSnapshot
+import com.ts7.dshremote.data.RunLog
 import com.ts7.dshremote.data.TurnNotice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -244,7 +245,12 @@ class BridgeService : Service() {
 
         val questions = hosts.flatMap { host -> host.pending.questions.map { host to it } }
         for ((host, question) in questions) {
-            if (seenQuestions.add(host.id to question.id)) Alerts.question(this, host.id, host.label, question)
+            if (seenQuestions.add(host.id to question.id)) {
+                if (question.planReview) {
+                    RunLog.info("notify", "${host.label} 计划待审阅 ${question.id}")
+                }
+                Alerts.question(this, host.id, host.label, question)
+            }
         }
         val questionKeys = questions.map { it.first.id to it.second.id }.toSet()
         for (old in seenQuestions - questionKeys) {

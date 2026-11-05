@@ -1,6 +1,6 @@
 {
   "name": "dsh-mobile-bridge",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "description": "LAN and Tailscale bridge that lets an Android phone drive DeepSeek Harness sessions: list tasks, prompt, approve tools, review plans and receive notifications. Ships an embedded tailnet node (tailscale.com/tsnet), so the PC needs no Tailscale client.",
   "license": "MIT",
   "type": "module",

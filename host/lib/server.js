@@ -7,6 +7,8 @@ import { lanAddresses, resolveDshHome } from './state.js'
 import { bridgeEndpoints, isTailnetHost } from './endpoints.js'
 import { imageRefsOf, projectRecords, serializeSummary } from './dto.js'
 import { normalizeBaseUrl } from './group.js'
+import { readSessionRecords } from './history.js'
+import { formatLogBundle } from './logs.js'
 
 const MAX_BODY_BYTES = 33_554_432
 const MAX_PROMPT_CHARS = 20_000
@@ -139,6 +141,31 @@ function sendError(res, status, code, message) {
   sendJson(res, status, { error: { code, message } })
 }
 
+/** 纯文本下载（日志导出）：带文件名让浏览器/手机直接存成 .log。 */
+function sendText(res, status, text, filename = null) {
+  const body = Buffer.from(text, 'utf8')
+  const headers = {
+    'content-type': 'text/plain; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'content-length': body.length
+  }
+  if (filename !== null) headers['content-disposition'] = `attachment; filename="${filename}"`
+  res.writeHead(status, headers)
+  res.end(body)
+}
+
+function fileStamp(date = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
+
+function clampLogLines(value, fallback = 400) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(1_500, Math.max(20, Math.round(n)))
+}
+
 async function readJson(req) {
   const chunks = []
   let size = 0
@@ -219,7 +246,7 @@ function toEpochMillis(value) {
   return undefined
 }
 
-export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null, updater = null }) {
+export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null, updater = null, logs = null }) {
   const csrf = randomBytes(24).toString('base64url')
   let server = null
 
@@ -368,14 +395,20 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
   }
 
-  async function inspectRecords(sessionId) {
+  async function inspectRecords(sessionId, options = {}) {
     try {
-      const inspection = await ctx.sessionController.inspect(sessionId, new AbortController().signal)
-      rememberImageRefs(sessionId, inspection.events)
-      return projectRecords(inspection.events)
+      // 历史读取按可用方法降级（page → events → inspect）；DSH 0.8.6 只有前两个，
+      // 老写法 inspect 在这里会抛错并让手机永远拿到空历史。
+      const page = await readSessionRecords(ctx, sessionId, {
+        maxMessages: options.maxMessages ?? MAX_HISTORY * 3,
+        beforeSeq: options.beforeSeq,
+        signal: options.signal ?? new AbortController().signal
+      })
+      rememberImageRefs(sessionId, page.records)
+      return { records: projectRecords(page.records), hasMore: page.hasMore, source: page.source }
     } catch (error) {
-      logger?.warn?.(`[mobile-bridge] inspect ${sessionId} failed: ${String(error?.message ?? error)}`)
-      return []
+      logger?.warn?.(`[mobile-bridge] 读取会话历史失败 ${sessionId}: ${String(error?.message ?? error)}`)
+      return { records: [], hasMore: false, source: null }
     }
   }
 
@@ -406,16 +439,19 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
   }
 
-  /** 手机按 (seq, index) 要图时用；缓存没命中就重读一次会话。 */
+  /** 手机按 (seq, index) 要图时用；缓存没命中就按 seq 回读一小段会话。 */
   async function loadImageRefs(sessionId, seq) {
     const key = `${sessionId}:${seq}`
     const cached = imageRefCache.get(key)
     if (cached !== undefined) return cached
     try {
-      const inspection = await ctx.sessionController.inspect(sessionId, new AbortController().signal)
-      rememberImageRefs(sessionId, inspection.events)
+      const page = await readSessionRecords(ctx, sessionId, {
+        maxMessages: 8,
+        beforeSeq: Number.isFinite(seq) ? seq + 1 : undefined
+      })
+      rememberImageRefs(sessionId, page.records)
     } catch (error) {
-      logger?.warn?.(`[mobile-bridge] image lookup ${sessionId}#${seq} failed: ${String(error?.message ?? error)}`)
+      logger?.warn?.(`[mobile-bridge] 读取图片所属消息失败 ${sessionId}#${seq}: ${String(error?.message ?? error)}`)
     }
     return imageRefCache.get(key) ?? []
   }
@@ -548,6 +584,9 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       update: updater?.snapshot?.() ?? null,
       collabRoot: collabRoot(),
       collabWorkspaceId: collabWorkspace()?.id ?? null,
+      logs: logs
+        ? { path: logs.path ?? null, dropped: logs.dropped ?? 0, error: logs.lastError ?? null }
+        : { path: null, dropped: 0, error: null },
       workspaces: workspaceList().map((workspace) => ({
         id: workspace.id,
         title: typeof workspace.title === 'string' ? workspace.title : workspace.id,
@@ -556,8 +595,31 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
   }
 
-  // 本机要告诉对端的回连地址：对端走 tailnet 就给 tailnet 地址，
-  // 否则给局域网地址——否则跨网络组起来的组，心跳会打到一个对端连不上的 IP 上。
+  /**
+   * 导出一份可独自看懂的诊断文本：环境头部 + 最近日志。
+   * 手机端「导出运行日志」走 /api/logs，PC 面板走 /api/setup/logs（loopback）。
+   */
+  function logBundle({ lines = 400 } = {}) {
+    const pending = approvals.pendingSnapshot()
+    return formatLogBundle({
+      sink: logs,
+      header: {
+        生成时间: new Date().toISOString(),
+        桥接版本: version,
+        设备ID: state.deviceId,
+        主机名: state.hostName,
+        端口: config.port,
+        在线手机: broadcast.count(),
+        待审批: pending.approvals.length,
+        待回答: pending.questions.length,
+        Node: process.version,
+        平台: `${process.platform}/${process.arch}`
+      },
+      lines
+    })
+  }
+
+  // 本机要告诉对端的回连地址：对端走 tailnet 就给 tailnet 地址，  // 否则给局域网地址——否则跨网络组起来的组，心跳会打到一个对端连不上的 IP 上。
   function advertisedBaseUrl(peerUrl, explicit) {
     const given = normalizeBaseUrl(explicit)
     if (given !== null) return given
@@ -618,6 +680,11 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       }
       if (method === 'GET' && path === '/api/setup/tailscale') {
         sendJson(res, 200, { tailscale: tailscale?.status?.() ?? null })
+        return
+      }
+      // PC 面板的「导出运行日志」：本机回环 + 只读，返回可直接保存的 .log。
+      if (method === 'GET' && path === '/api/setup/logs') {
+        sendText(res, 200, logBundle({ lines: clampLogLines(url.searchParams.get('lines')) }), `dsh-remote-host-${fileStamp()}.log`)
         return
       }
       if (method !== 'POST') throw new BridgeError('method/not-allowed', '方法不允许', 405)
@@ -803,6 +870,22 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         device: { id: device.id, name: device.name },
         settings: publicSettings()
       })
+      return
+    }
+
+    if (method === 'GET' && path === '/api/logs') {
+      if (identity.kind === 'peer') throw new BridgeError('auth/forbidden', '绑定组成员不读取日志', 403)
+      const lines = clampLogLines(url.searchParams.get('lines'))
+      const text = logBundle({ lines })
+      if (url.searchParams.get('format') === 'json') {
+        sendJson(res, 200, {
+          path: logs?.path ?? null,
+          count: typeof logs?.lines === 'function' ? logs.lines(lines).length : 0,
+          text
+        })
+        return
+      }
+      sendText(res, 200, text, `dsh-remote-host-${fileStamp()}.log`)
       return
     }
 
@@ -1069,11 +1152,11 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       if (method === 'GET' && action === null) {
         const summary = await findSummary(sessionId)
         if (summary === null) throw new BridgeError('session/not-found', '会话不存在', 404)
-        const records = await inspectRecords(sessionId)
+        const history = await inspectRecords(sessionId)
         if (summary.running || summary.agentAvailable) void hub.ensureFollow(sessionId)
         sendJson(res, 200, {
           session: summary,
-          records: records.slice(-MAX_HISTORY * 2),
+          records: history.records.slice(-MAX_HISTORY * 2),
           pending: approvals.pendingSnapshot()
         })
         return
@@ -1098,11 +1181,15 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       if (method === 'GET' && action === 'history') {
         const beforeSeq = Number(url.searchParams.get('beforeSeq'))
         const maxMessages = Math.min(200, Math.max(1, Number(url.searchParams.get('maxMessages')) || MAX_HISTORY))
-        let records = await inspectRecords(sessionId)
-        if (Number.isFinite(beforeSeq) && beforeSeq > 0) records = records.filter((item) => item.seq < beforeSeq)
-        const hasMore = records.length > maxMessages
+        const hasBefore = Number.isFinite(beforeSeq) && beforeSeq > 0
+        // 多要一条只为判断 hasMore，真实返回仍是最近 maxMessages 条。
+        const page = await inspectRecords(sessionId, {
+          maxMessages: maxMessages + 1,
+          beforeSeq: hasBefore ? beforeSeq : undefined
+        })
+        const hasMore = page.hasMore || page.records.length > maxMessages
         sendJson(res, 200, {
-          records: hasMore ? records.slice(-maxMessages) : records,
+          records: page.records.slice(-maxMessages),
           hasMore
         })
         return

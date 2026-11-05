@@ -335,6 +335,14 @@ data class GroupInviteResponse(
     val endpoints: List<BridgeEndpoint> = emptyList()
 )
 
+/** 主机侧日志包：path 是落盘位置，text 是可以直接发出去的诊断文本。 */
+@Serializable
+data class HostLogBundle(
+    val path: String? = null,
+    val count: Int = 0,
+    val text: String = ""
+)
+
 data class SseEvent(val name: String, val data: String)
 
 enum class ConnectionState { Disconnected, Connecting, Connected, Error }

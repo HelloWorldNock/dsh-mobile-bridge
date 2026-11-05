@@ -89,8 +89,14 @@ export function createApprovals({ ctx, broadcast, settings, logger, titleFor, on
   const questions = new Map()
   const offs = []
 
-  function phoneActive() {
-    return settings.phoneFirst !== false && broadcast.hasClients()
+  /** 手机远控是否被启用（看设置，跟此刻有没有连接无关）。 */
+  function phoneEnabled() {
+    return settings.phoneFirst !== false
+  }
+
+  /** 此刻是否有手机挂着事件流。 */
+  function phoneConnected() {
+    return broadcast.hasClients()
   }
 
   function gatewayOf() {
@@ -315,7 +321,11 @@ export function createApprovals({ ctx, broadcast, settings, logger, titleFor, on
   }
 
   async function handleApproval(request, next) {
-    if (!phoneActive()) return desktopActive() ? next() : 'unavailable'
+    // 只要手机远控开着，审批就留在待办里：手机可能只是暂时断线（锁屏、切网），
+    // 重连后要能从 /api/pending 拿回同一张卡片，而不是被 next() 永久交给桌面。
+    // 真正没人能作答（手机没连、桌面也没开）时才回 unavailable。
+    if (!phoneEnabled()) return desktopActive() ? next() : 'unavailable'
+    if (!phoneConnected() && !desktopActive()) return 'unavailable'
     const sessionId = request.agent?.session?.id ?? null
     const preview = approvalPreview(request.agent?.session, request.callId)
     const timeoutMs = timeoutOf(settings.approvalTimeoutMs, 120_000)
@@ -379,7 +389,12 @@ export function createApprovals({ ctx, broadcast, settings, logger, titleFor, on
   }
 
   async function handleQuestion(request, next) {
-    if (!phoneActive()) return next()
+    // 计划审阅（intent.kind === 'plan-review'）只会走这条 waterfall。老逻辑要求
+    // 手机「此刻」挂着事件流才接管，于是手机刚好断线/重连时这个请求直接给了桌面，
+    // 手机待办里再也没有它 —— 用户看到的就是「PC 有卡片、手机什么都没有」。
+    // 现在只看开关：开着就先建成卡片，手机回来时从 /api/pending 取回；没人答就
+    // 按超时交回 DSH（和桌面卡片被无视的结果一样，不会把请求弄丢）。
+    if (!phoneEnabled()) return next()
     if (request.wait?.timed === true) return next()
     const list = Array.isArray(request.questions) ? request.questions : []
     if (list.length === 0) return next()
@@ -486,11 +501,18 @@ export function createApprovals({ ctx, broadcast, settings, logger, titleFor, on
   }
 
   /**
-   * 最后一部手机断开时收掉手机侧卡片。桌面还开着的话继续等桌面作答，
-   * 不把决定权抢回给 DSH。
+   * 手机断开时的收尾。
+   *
+   * 桌面还开着：卡片留着。手机重连后 /api/pending 会把这张卡交回给它，超时或
+   * 桌面作答各自负责收尾 —— 这是「手机没收到计划审批」最常见的那条路径。
+   * 桌面也关了：没人能答，维持旧行为立刻交回 DSH。
    */
   function revalidate() {
-    if (phoneActive()) return
+    if (phoneConnected()) return
+    if (desktopActive()) {
+      logger?.debug?.('[mobile-bridge] phone stream detached; pending cards kept until timeout')
+      return
+    }
     for (const entry of [...approvals.values()]) expirePhone('approval', entry, 'disconnected')
     for (const entry of [...questions.values()]) expirePhone('question', entry, 'disconnected')
   }

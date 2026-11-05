@@ -10,11 +10,12 @@ import { createGroup } from './group.js'
 import { createCollab } from './collab.js'
 import { createUpdater } from './update.js'
 import { createCollabTool, registerCollabTool } from './tool.js'
+import { createLogSink, wrapLogger, startLogTee } from './logs.js'
 
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.8.6'
+const VERSION = '0.8.7'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,
@@ -36,7 +37,10 @@ function timeout(value, fallback) {
 
 export function apply(ctx, config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
-  const logger = ctx.logger ?? console
+  // 日志先建起来：后面每个模块的 logger 都换成它，落盘从最早一行开始。
+  const logs = createLogSink()
+  const logger = wrapLogger(ctx.logger ?? console, logs)
+  const stopTee = startLogTee(logs)
   const cfg = {
     port: positivePort(raw.port, DEFAULTS.port),
     discoveryPort: positivePort(raw.discoveryPort, DEFAULTS.discoveryPort),
@@ -161,6 +165,7 @@ export function apply(ctx, config) {
       logger,
       version: VERSION,
       ctx,
+      logs,
       onDiscoveryChange: syncDiscovery,
       tailscale,
       group,
@@ -175,6 +180,7 @@ export function apply(ctx, config) {
     registerCollabTool({ ctx, tool: createCollabTool({ collab }), logger })
     syncDiscovery()
     logger.info?.(`[mobile-bridge] listening on http://${cfg.bindHost}:${actualPort} (discovery udp/${cfg.discoveryPort})`)
+    logger.info?.(`[mobile-bridge] v${VERSION} · ${process.platform}/${process.arch} · node ${process.version} · 日志 ${logs.path ?? '(未落盘)'}`)
     logger.info?.(`[mobile-bridge] open http://127.0.0.1:${actualPort}/ on this PC to pair a phone`)
   }
 
@@ -185,6 +191,7 @@ export function apply(ctx, config) {
   ctx.effect(() => {
     return () => {
       stopped = true
+      stopTee()
       void (async () => {
         await ready
         try {

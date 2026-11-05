@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Keeps one runtime per paired desktop. Every host keeps its own SSE stream,
@@ -100,6 +101,12 @@ class BridgeRepository(
         var eventFailures: Int = 0
         var sessionsRefreshing: Boolean = false
         var pendingRefreshing: Boolean = false
+
+        /**
+         * 每张待办卡片最后一次被本地写入的时刻。
+         * 打完服务端快照后靠它区分「刚到的卡片」和「服务端已经不认了的旧卡片」。
+         */
+        val pendingAddedAt: MutableMap<String, Long> = mutableMapOf()
 
         /** 这台主机所在绑定组的状态，断连时保留上一次结果。 */
         var group: GroupInfo? = null
@@ -565,16 +572,52 @@ class BridgeRepository(
         if (runtime.pendingRefreshing) return
         runtime.pendingRefreshing = true
         scope.launch {
+            val requestedAt = System.currentTimeMillis()
             try {
-                runCatching { client.pending() }.onSuccess { pending ->
-                    if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
-                    if (pending == runtime.pending) return@onSuccess
-                    runtime.pending = pending
-                    sync()
-                }
+                runCatching { client.pending() }
+                    .onSuccess { pending ->
+                        if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
+                        applyPending(runtime, pending, requestedAt)
+                    }
+                    .onFailure { failure -> RunLog.warn("pending", "刷新失败：${failure.message}") }
             } finally {
                 runtime.pendingRefreshing = false
             }
+        }
+    }
+
+    /**
+     * 服务端的待办队列是权威的：拉回来就整体替换，只有「这一轮请求发出之后才到本地」的卡片
+     * 才保留 —— 那是在路上撞车的 SSE 帧，不是陈旧数据。
+     */
+    private fun applyPending(runtime: Runtime, incoming: PendingState, requestedAt: Long) {
+        fun fresh(id: String): Boolean = (runtime.pendingAddedAt[id] ?: 0L) >= requestedAt
+        val next = PendingState(
+            approvals = (incoming.approvals + runtime.pending.approvals.filter { fresh(it.id) }).distinctBy { it.id },
+            questions = (incoming.questions + runtime.pending.questions.filter { fresh(it.id) }).distinctBy { it.id }
+        )
+        if (next == runtime.pending) return
+        logPendingDiff(runtime, runtime.pending, next)
+        runtime.pending = next
+        val alive = (next.approvals.map { it.id } + next.questions.map { it.id }).toSet()
+        runtime.pendingAddedAt.keys.retainAll(alive)
+        sync()
+    }
+
+    private fun logPendingDiff(runtime: Runtime, before: PendingState, after: PendingState) {
+        val beforeIds = (before.approvals.map { it.id } + before.questions.map { it.id }).toSet()
+        val afterIds = (after.approvals.map { it.id } + after.questions.map { it.id }).toSet()
+        for (id in afterIds - beforeIds) {
+            val question = after.questions.firstOrNull { it.id == id }
+            val kind = when {
+                question == null -> "审批"
+                question.planReview -> "计划审阅"
+                else -> "提问"
+            }
+            RunLog.info("pending", "新增$kind $id · ${runtime.label}")
+        }
+        for (id in beforeIds - afterIds) {
+            RunLog.info("pending", "撤下 $id · ${runtime.label}")
         }
     }
 
@@ -591,6 +634,50 @@ class BridgeRepository(
             refreshSessions(runtime.profile.id)
             refreshPending(runtime.profile.id)
         }
+    }
+
+    /**
+     * 拼一份能直接发出去的诊断文本：手机端环境 + 手机端事件 + 每台主机的运行日志。
+     *
+     * 主机的日志要连得上才拿得到；连不上就在对应段落里写明原因，不影响其余部分导出。
+     */
+    suspend fun collectLogs(hostLines: Int = 400): String = withContext(Dispatchers.IO) {
+        val builder = StringBuilder()
+        builder.appendLine("==== DSH 手机远控 · 运行日志 ====")
+        builder.appendLine("生成时间: ${RunLog.timestamp()}")
+        builder.appendLine("App: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        builder.appendLine("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT}) · ${Build.MODEL}")
+        builder.appendLine("前台服务: ${if (started) "已启动" else "未启动"}")
+        builder.appendLine("已配对主机: ${runtimes.size}")
+        for (runtime in runtimes.values) {
+            builder.appendLine(
+                "  - ${runtime.label} · ${runtime.profile.baseUrl} · ${runtime.connection}" +
+                    " · 待办 ${runtime.pendingCount}"
+            )
+        }
+        builder.appendLine()
+        builder.appendLine("---- 手机端事件（最近 ${RunLog.size()} 条）----")
+        builder.append(if (RunLog.size() == 0) "（还没有事件）\n" else RunLog.text())
+        builder.appendLine()
+
+        for (runtime in runtimes.values.toList()) {
+            builder.appendLine()
+            builder.appendLine("---- 主机 ${runtime.label} · ${runtime.profile.baseUrl} ----")
+            val client = runtime.client
+            if (client == null) {
+                builder.appendLine("未连接，拿不到主机日志（连接状态：${runtime.connection}）")
+                continue
+            }
+            runCatching { client.logs(hostLines) }
+                .onSuccess { bundle ->
+                    if (!bundle.path.isNullOrBlank()) builder.appendLine("日志文件: ${bundle.path}")
+                    builder.appendLine(bundle.text.ifBlank { "（主机日志为空）" })
+                }
+                .onFailure { failure ->
+                    builder.appendLine("拉取失败：${failure.javaClass.simpleName} ${failure.message}")
+                }
+        }
+        builder.toString()
     }
 
     fun openSession(id: String) {
@@ -783,7 +870,11 @@ class BridgeRepository(
                 runtime.error = null
                 sync()
                 val failure = runCatching { connectOnce(runtime) }.exceptionOrNull()
-                if (failure == null) break
+                if (failure == null) {
+                    RunLog.info("conn", "${runtime.label} 已连接（${runtime.endpointKind ?: "?"}）")
+                    break
+                }
+                RunLog.warn("conn", "${runtime.label} 连接失败：${failure.javaClass.simpleName} ${failure.message}")
                 runtime.connection = ConnectionState.Error
                 runtime.error = failure.message?.takeIf { it.isNotBlank() } ?: "无法连接主机"
                 sync()
@@ -890,12 +981,17 @@ class BridgeRepository(
                 }
                 if (!isActive) break
                 if (failure is ApiException && failure.status == 401) {
+                    RunLog.error("sse", "${runtime.label} 事件流被拒绝（401），需要重新配对")
                     runtime.connection = ConnectionState.Error
                     runtime.error = failure.message
                     sync()
                     break
                 }
                 runtime.eventFailures += 1
+                RunLog.warn(
+                    "sse",
+                    "${runtime.label} 事件流断开：${failure?.javaClass?.simpleName} ${failure?.message}（第 ${runtime.eventFailures} 次）"
+                )
                 // Dropped streams are routine on mobile networks (NAT rebinding,
                 // screen-off power saving). Retry the same endpoint twice before
                 // paying for a full LAN/Tailscale route probe, so a single blip
@@ -943,6 +1039,7 @@ class BridgeRepository(
     }
 
     private fun loadSession(runtime: Runtime, client: BridgeClient, id: String) {
+        val requestedAt = System.currentTimeMillis()
         scope.launch {
             runCatching {
                 // subscribe 只是让 host 开始跟随这个会话，失败不该挡住历史加载，
@@ -956,7 +1053,7 @@ class BridgeRepository(
                 runtime.detail = detail
                 runtime.lastDetail = detail
                 runtime.timeline = detail.records
-                runtime.pending = mergePending(runtime.pending, detail.pending)
+                applyPending(runtime, detail.pending, requestedAt)
                 runtime.busy = false
                 detail.records.lastOrNull { it.kind == "assistant" }?.text?.let {
                     runtime.assistantTexts[id] = it.take(4_000)
@@ -970,6 +1067,7 @@ class BridgeRepository(
                 }
                 if (runtime.pendingCount > 0) refreshPending(runtime.profile.id)
             }.onFailure { error ->
+                RunLog.error("session", "打开会话失败 $id：${error.javaClass.simpleName} ${error.message}")
                 if (runtime.activeSessionId == id) {
                     runtime.busy = false
                     runtime.error = error.message ?: "无法打开任务"
@@ -1132,6 +1230,7 @@ class BridgeRepository(
             when (event.name) {
                 "hello" -> {
                     val recovered = runtime.eventFailures > 0
+                    RunLog.info("sse", "${runtime.label} 事件流就绪${if (recovered) "（重连）" else ""}")
                     runtime.connection = ConnectionState.Connected
                     runtime.error = null
                     runtime.eventFailures = 0
@@ -1252,16 +1351,27 @@ class BridgeRepository(
                 }
                 "approval.requested" -> {
                     val approval = JsonConfig.json.decodeFromString(PendingApproval.serializer(), event.data)
+                    runtime.pendingAddedAt[approval.id] = System.currentTimeMillis()
+                    val before = runtime.pending
                     runtime.pending = runtime.pending.copy(
                         approvals = upsertApproval(runtime.pending.approvals, approval)
                     )
+                    if (before != runtime.pending) {
+                        RunLog.info("pending", "推送审批 ${approval.toolName.ifBlank { "tool" }} · ${runtime.label}")
+                    }
                     sync()
                 }
                 "question.requested" -> {
                     val question = JsonConfig.json.decodeFromString(PendingQuestion.serializer(), event.data)
+                    runtime.pendingAddedAt[question.id] = System.currentTimeMillis()
+                    val before = runtime.pending
                     runtime.pending = runtime.pending.copy(
                         questions = upsertQuestion(runtime.pending.questions, question)
                     )
+                    if (before != runtime.pending) {
+                        val kind = if (question.planReview) "计划审阅" else "提问"
+                        RunLog.info("pending", "推送$kind ${question.id} · ${runtime.label}")
+                    }
                     sync()
                 }
                 "approval.closed" -> {
@@ -1274,8 +1384,17 @@ class BridgeRepository(
                 }
                 "notice" -> {
                     val envelope = JsonConfig.json.decodeFromString(NoticeEnvelope.serializer(), event.data)
-                    val sessionId = envelope.sessionId ?: return
                     val kind = envelope.kind ?: return
+                    if (kind == "attention") {
+                        // 主机的提醒只是「回头看一眼队列」的信号，卡片本体还得从 /api/pending 拿。
+                        // 手机在前台时这条帧可能比 SSE 的 question.requested 先到，所以别在这里
+                        // 自己拼卡片，直接补一次刷新就好。
+                        RunLog.info("notice", "attention ${envelope.title.orEmpty()}")
+                        refreshPending(runtime.profile.id)
+                        refreshSessions(runtime.profile.id)
+                        return
+                    }
+                    val sessionId = envelope.sessionId ?: return
                     if (kind != "turn-end" && kind != "turn-error") return
                     if (kind == "turn-end") {
                         envelope.text?.takeIf { it.isNotBlank() }?.let {
@@ -1303,23 +1422,24 @@ class BridgeRepository(
     }
 
     private fun removeApproval(runtime: Runtime, id: String) {
+        val before = runtime.pending
         runtime.pending = runtime.pending.copy(
             approvals = runtime.pending.approvals.filterNot { it.id == id }
         )
+        runtime.pendingAddedAt.remove(id)
+        if (before != runtime.pending) RunLog.info("pending", "审批已关闭 $id · ${runtime.label}")
         sync()
     }
 
     private fun removeQuestion(runtime: Runtime, id: String) {
+        val before = runtime.pending
         runtime.pending = runtime.pending.copy(
             questions = runtime.pending.questions.filterNot { it.id == id }
         )
+        runtime.pendingAddedAt.remove(id)
+        if (before != runtime.pending) RunLog.info("pending", "提问已关闭 $id · ${runtime.label}")
         sync()
     }
-
-    private fun mergePending(current: PendingState, incoming: PendingState): PendingState = PendingState(
-        approvals = (current.approvals + incoming.approvals).distinctBy { it.id },
-        questions = (current.questions + incoming.questions).distinctBy { it.id }
-    )
 
     private fun persist() {
         HostStore.save(appContext, runtimes.values.map { it.profile })

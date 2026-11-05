@@ -76,6 +76,9 @@ import com.ts7.dshremote.ui.theme.SurfaceRaised
 import com.ts7.dshremote.ui.theme.TextMuted
 import com.ts7.dshremote.ui.theme.TextPrimary
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun SettingsScreen(
@@ -89,6 +92,7 @@ fun SettingsScreen(
     onAddEndpoint: (String, String) -> Result<Unit>,
     onApprovals: () -> Unit,
     onLinkGroup: suspend () -> String?,
+    onCollectLogs: suspend () -> String,
     onCheckUpdate: () -> Unit
 ) {
     var forgetTarget by remember { mutableStateOf<HostSummary?>(null) }
@@ -99,6 +103,7 @@ fun SettingsScreen(
     var authKeyValue by remember { mutableStateOf("") }
     val ts by tailscale.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val host = state.info?.bridge
     val device = state.info?.device
 
@@ -382,6 +387,54 @@ fun SettingsScreen(
                         modifier = Modifier.padding(top = 8.dp)
                     )
                 }
+
+                SectionLabel("排查与日志")
+                var logBusy by remember { mutableStateOf(false) }
+                var logError by remember { mutableStateOf<String?>(null) }
+                var pendingLog by remember { mutableStateOf<String?>(null) }
+                val logSaver = rememberLauncherForActivityResult(
+                    ActivityResultContracts.CreateDocument("text/plain")
+                ) { uri ->
+                    val text = pendingLog
+                    pendingLog = null
+                    if (uri == null || text == null) return@rememberLauncherForActivityResult
+                    val failure = runCatching {
+                        context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                            ?: error("所选位置不可写")
+                    }.exceptionOrNull()
+                    logError = failure?.let { "保存失败：${it.message ?: "未知错误"}" }
+                }
+                SettingRow(
+                    title = "导出运行日志",
+                    detail = logError
+                        ?: "手机端事件 + 每台电脑的运行日志。手机连不上电脑时也能导出，只是没有电脑那一段。",
+                    detailColor = if (logError != null) Danger else TextMuted
+                ) {
+                    TextButton(
+                        enabled = !logBusy,
+                        onClick = {
+                            logError = null
+                            logBusy = true
+                            scope.launch {
+                                val text = runCatching { onCollectLogs() }
+                                    .getOrElse { failure ->
+                                        logBusy = false
+                                        logError = "收集失败：${failure.message ?: "未知错误"}"
+                                        return@launch
+                                    }
+                                logBusy = false
+                                pendingLog = text
+                                logSaver.launch("dsh-remote-${logStamp()}.log")
+                            }
+                        }
+                    ) { Text(if (logBusy) "收集…" else "导出", color = Amber) }
+                }
+                Text(
+                    "手机端只记最近几百条事件（连接、事件流、待办变化），重启后清空；电脑端的日志落在插件目录的 logs/bridge.log。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
 
                 SectionLabel("关于")
                 val update = state.update
@@ -716,3 +769,6 @@ private fun SettingRow(
         action()
     }
 }
+
+private fun logStamp(): String =
+    SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
