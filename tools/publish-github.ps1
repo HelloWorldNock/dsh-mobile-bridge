@@ -16,10 +16,16 @@ param(
   [string]$Owner = 'HelloWorldNock',
   [string]$Repo = 'dsh-mobile-bridge',
   [string]$Version = '0.1.0',
-  [string]$Proxy = (if ($env:HTTPS_PROXY) { $env:HTTPS_PROXY } else { 'http://127.0.0.1:7890' })
+  [string]$Proxy
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Windows PowerShell 5.1 cannot evaluate a parenthesized `if` as a default
+# value, so the fallback lives here instead of in the param block.
+if ([string]::IsNullOrWhiteSpace($Proxy)) {
+  $Proxy = if ($env:HTTPS_PROXY) { $env:HTTPS_PROXY } else { 'http://127.0.0.1:7890' }
+}
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $api = 'https://api.github.com'
 $headers = @{
