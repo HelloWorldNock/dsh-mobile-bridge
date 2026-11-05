@@ -211,6 +211,14 @@ export function createAuth({ state, save, settings, logger, now = () => Date.now
       }
       settings.collabRoot = value
     }
+    // 默认工作区目录：手机在这个目录下新建工作区文件夹，所以同样必须是绝对路径。
+    if (typeof patch.workspaceRoot === 'string') {
+      const value = patch.workspaceRoot.trim().slice(0, 400)
+      if (value !== '' && !isAbsolute(value)) {
+        throw new BridgeError('setup/bad-root', '默认工作区目录必须是绝对路径，例如 F:\\AgentWorkProject', 400)
+      }
+      settings.workspaceRoot = value
+    }
     persist()
     return { ...settings }
   }

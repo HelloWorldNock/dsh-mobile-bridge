@@ -14,7 +14,7 @@ import { createCollabTool, registerCollabTool } from './tool.js'
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.8.4'
+const VERSION = '0.8.6'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,
@@ -65,6 +65,7 @@ export function apply(ctx, config) {
     if (Number.isFinite(raw.approvalTimeoutMs)) state.settings.approvalTimeoutMs = timeout(raw.approvalTimeoutMs, DEFAULTS.approvalTimeoutMs)
     if (Number.isFinite(raw.questionTimeoutMs)) state.settings.questionTimeoutMs = timeout(raw.questionTimeoutMs, DEFAULTS.questionTimeoutMs)
     if (Number.isFinite(raw.planReviewTimeoutMs)) state.settings.planReviewTimeoutMs = timeout(raw.planReviewTimeoutMs, DEFAULTS.planReviewTimeoutMs)
+    if (typeof raw.workspaceRoot === 'string') state.settings.workspaceRoot = raw.workspaceRoot.trim()
 
     const auth = createAuth({
       state,

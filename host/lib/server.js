@@ -1,11 +1,11 @@
 import http from 'node:http'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { BridgeError } from './auth.js'
 import { lanAddresses, resolveDshHome } from './state.js'
 import { bridgeEndpoints, isTailnetHost } from './endpoints.js'
-import { projectRecords, serializeSummary } from './dto.js'
+import { imageRefsOf, projectRecords, serializeSummary } from './dto.js'
 import { normalizeBaseUrl } from './group.js'
 
 const MAX_BODY_BYTES = 33_554_432
@@ -371,10 +371,62 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   async function inspectRecords(sessionId) {
     try {
       const inspection = await ctx.sessionController.inspect(sessionId, new AbortController().signal)
+      rememberImageRefs(sessionId, inspection.events)
       return projectRecords(inspection.events)
     } catch (error) {
       logger?.warn?.(`[mobile-bridge] inspect ${sessionId} failed: ${String(error?.message ?? error)}`)
       return []
+    }
+  }
+
+  /**
+   * (sessionId:seq) → 该条消息里的图片引用。
+   * 图片是内容寻址的，引用一经产生就不会变，所以缓存不需要失效逻辑，只限制条数。
+   */
+  const imageRefCache = new Map()
+  const MAX_IMAGE_REF_CACHE = 256
+
+  function rememberImageRefs(sessionId, events) {
+    if (!Array.isArray(events)) return
+    for (const event of events) {
+      const record = event?.type === 'event' ? event.event : event
+      if (record === null || typeof record !== 'object') continue
+      if (record.type !== 'user/message' && record.type !== 'assistant/message') continue
+      const content = record.type === 'user/message' ? record.data?.content : record.data?.message?.content
+      const refs = imageRefsOf(content)
+      if (refs.length === 0) continue
+      const key = `${sessionId}:${Number.isFinite(record.seq) ? record.seq : 0}`
+      imageRefCache.delete(key)
+      imageRefCache.set(key, refs)
+      while (imageRefCache.size > MAX_IMAGE_REF_CACHE) {
+        const oldest = imageRefCache.keys().next().value
+        if (oldest === undefined) break
+        imageRefCache.delete(oldest)
+      }
+    }
+  }
+
+  /** 手机按 (seq, index) 要图时用；缓存没命中就重读一次会话。 */
+  async function loadImageRefs(sessionId, seq) {
+    const key = `${sessionId}:${seq}`
+    const cached = imageRefCache.get(key)
+    if (cached !== undefined) return cached
+    try {
+      const inspection = await ctx.sessionController.inspect(sessionId, new AbortController().signal)
+      rememberImageRefs(sessionId, inspection.events)
+    } catch (error) {
+      logger?.warn?.(`[mobile-bridge] image lookup ${sessionId}#${seq} failed: ${String(error?.message ?? error)}`)
+    }
+    return imageRefCache.get(key) ?? []
+  }
+
+  /** 附件服务只在需要时才取，DSH 没挂附件服务时图片接口自己报错即可。 */
+  function attachmentsService() {
+    try {
+      const service = typeof ctx.get === 'function' ? ctx.get('attachments') : ctx.attachments
+      return service ?? null
+    } catch {
+      return null
     }
   }
 
@@ -403,7 +455,30 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   }
 
   /**
-   * 协作工作区：优先用面板选中的 DSH 工作区（id 指向 registry 里的真实目录），
+   * 默认工作区目录：桌面端在设置里填一个绝对路径后，手机新建任务时可以在这个目录下
+   * 再建子目录当工作区。目录不存在就当作没配置——否则等于允许手机在任意位置建目录。
+   */
+  function workspaceRoot() {
+    const value = typeof settings.workspaceRoot === 'string' ? settings.workspaceRoot.trim() : ''
+    if (value === '' || !isAbsolute(value)) return null
+    const dir = resolve(value)
+    return existsSync(dir) ? dir : null
+  }
+
+  /** 手机传来的只是文件夹名，不是路径：去掉分隔符和 Windows 非法字符，杜绝跳出根目录。 */
+  function cleanFolderName(raw) {
+    if (typeof raw !== 'string') return null
+    const name = raw
+      .trim()
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+      .replace(/\s+$/g, '')
+      .slice(0, 60)
+      .trim()
+    if (name === '' || name === '.' || name === '..') return null
+    return name
+  }
+
+  /** 协作工作区：优先用面板选中的 DSH 工作区（id 指向 registry 里的真实目录），
    * 其次用绝对路径的协作目录。相对路径一律忽略——它会被 DSH 按进程 cwd 解析成
    * profiles\desktop 下的临时目录，协作会话就跑出工作区了。
    */
@@ -722,6 +797,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
           discoveryPort: config.discoveryPort,
           addresses: lanAddresses(),
           endpoints: allEndpoints(),
+          workspaceRoot: workspaceRoot(),
           clients: broadcast.count()
         },
         device: { id: device.id, name: device.name },
@@ -733,6 +809,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     if (method === 'GET' && path === '/api/workspaces') {
       const list = typeof ctx.workspaceRegistry?.list === 'function' ? ctx.workspaceRegistry.list() : []
       sendJson(res, 200, {
+        root: workspaceRoot(),
         workspaces: list.map((workspace) => ({
           id: workspace.id,
           path: workspace.path,
@@ -740,6 +817,54 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
           updatedAt: toEpochMillis(workspace.updatedAt),
           sessionIds: workspace.sessionIds ?? []
         }))
+      })
+      return
+    }
+
+    // 手机端新建工作区：在默认工作区目录下建一个子目录，并登记成 DSH 工作区。
+    if (method === 'POST' && path === '/api/workspaces') {
+      const root = workspaceRoot()
+      if (root === null) {
+        throw new BridgeError(
+          'workspace/no-root',
+          '电脑端还没设置默认工作区目录，先在「手机桥接」设置里填一个文件夹',
+          409
+        )
+      }
+      const body = await readJson(req)
+      const name = cleanFolderName(body.name)
+      if (name === null) throw new BridgeError('workspace/bad-name', '文件夹名不合法', 400)
+      const target = resolve(root, name)
+      const rel = relative(root, target)
+      if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || rel.includes(sep)) {
+        throw new BridgeError('workspace/bad-name', '文件夹名不合法', 400)
+      }
+      const registry = ctx.workspaceRegistry
+      if (typeof registry?.create !== 'function') {
+        throw new BridgeError('workspace/unavailable', '当前 Host 不能创建工作区', 503)
+      }
+      let workspace = typeof registry.resolveByPath === 'function' ? registry.resolveByPath(target) : undefined
+      if (workspace === undefined || workspace === null) {
+        if (existsSync(target)) {
+          if (!statSync(target).isDirectory()) throw new BridgeError('workspace/exists', '已有同名文件', 409)
+        } else {
+          try {
+            mkdirSync(target)
+          } catch (error) {
+            throw new BridgeError('workspace/create-failed', `建目录失败：${String(error?.message ?? error)}`, 409)
+          }
+        }
+        workspace = await registry.create(target, name)
+      }
+      sendJson(res, 200, {
+        root,
+        workspace: {
+          id: workspace.id,
+          path: workspace.path,
+          title: workspace.title,
+          updatedAt: toEpochMillis(workspace.updatedAt),
+          sessionIds: workspace.sessionIds ?? []
+        }
       })
       return
     }
@@ -901,6 +1026,38 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         }
       }
       sendJson(res, 200, { sessionId, agentPreset: session.agentPreset ?? null, resumed, warnings })
+      return
+    }
+
+    // 历史图片的原始字节：手机按 (seq, 图片序号) 取，序号与时间线里的 images[].index 一致。
+    // 单独匹配，是因为下面那条会话正则只允许一段 action。
+    const imageMatch = /^\/api\/sessions\/([^/]+)\/images\/(\d+)\/(\d+)$/.exec(path)
+    if (imageMatch !== null) {
+      if (method !== 'GET') throw new BridgeError('method/not-allowed', '不支持的方法', 405)
+      const imageSessionId = decodeURIComponent(imageMatch[1])
+      const imageSeq = Number(imageMatch[2])
+      const imageIndex = Number(imageMatch[3])
+      const refs = await loadImageRefs(imageSessionId, imageSeq)
+      const ref = refs[imageIndex]
+      if (ref === undefined) throw new BridgeError('image/not-found', '这条消息里没有这张图片', 404)
+      const attachments = attachmentsService()
+      if (attachments === null || typeof attachments.readImage !== 'function') {
+        throw new BridgeError('image/unavailable', 'Host 没有附件服务，读不了历史图片', 503)
+      }
+      let stored
+      try {
+        stored = await attachments.readImage(ref, new AbortController().signal)
+      } catch (error) {
+        throw new BridgeError('image/unavailable', `图片已不可读：${String(error?.message ?? error)}`, 404)
+      }
+      const bytes = Buffer.from(stored.data)
+      res.writeHead(200, {
+        'content-type': typeof stored.ref?.mediaType === 'string' ? stored.ref.mediaType : 'application/octet-stream',
+        'content-length': String(bytes.length),
+        'cache-control': 'private, max-age=86400',
+        'x-content-type-options': 'nosniff'
+      })
+      res.end(bytes)
       return
     }
 

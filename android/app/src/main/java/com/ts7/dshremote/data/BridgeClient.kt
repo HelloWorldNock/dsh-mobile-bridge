@@ -75,7 +75,37 @@ class BridgeClient(
 
     suspend fun info(): BridgeInfo = decode(request("GET", "/api/info"))
 
-    suspend fun workspaces(): List<Workspace> = decode<WorkspaceList>(request("GET", "/api/workspaces")).workspaces
+    suspend fun workspaces(): WorkspaceList = decode(request("GET", "/api/workspaces"))
+
+    /** 在主机「默认工作区目录」下建子目录并登记成工作区。 */
+    suspend fun createWorkspace(name: String): Workspace =
+        decode<WorkspaceResponse>(
+            request(
+                "POST",
+                "/api/workspaces",
+                """{"name":${json.encodeToString(String.serializer(), name)}}"""
+            )
+        ).workspace
+
+    /**
+     * 历史图片的原始字节。图片是内容寻址的附件，按 (会话, 事件 seq, 图片序号) 取，
+     * 序号对应时间线里 images[].index。
+     */
+    suspend fun imageBytes(sessionId: String, seq: Long, index: Int): ByteArray =
+        withContext(Dispatchers.IO) {
+            val encoded = java.net.URLEncoder.encode(sessionId, "UTF-8")
+            val request = Request.Builder()
+                .url("$baseUrl/api/sessions/$encoded/images/$seq/$index")
+                .header("Authorization", "Bearer $token")
+                .get()
+                .build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw ApiException("image/http-${response.code}", "图片加载失败（${response.code}）", response.code)
+                }
+                response.body?.bytes() ?: throw IOException("图片响应为空")
+            }
+        }
 
     suspend fun sessions(query: String = ""): List<SessionSummary> {
         val suffix = if (query.isBlank()) "" else "?q=${java.net.URLEncoder.encode(query, "UTF-8")}"

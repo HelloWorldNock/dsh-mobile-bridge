@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.util.LruCache
 import com.ts7.dshremote.BuildConfig
 import java.io.IOException
 import java.util.UUID
@@ -78,6 +79,9 @@ class BridgeRepository(
         var sessions: List<SessionSummary> = emptyList()
         var pending: PendingState = PendingState()
         var workspaces: List<Workspace> = emptyList()
+
+        /** 桌面端设置的默认工作区目录；为 null 表示手机端不能新建工作区文件夹。 */
+        var workspaceRoot: String? = null
         var presets: PresetCatalog = PresetCatalog()
         var catalogLoading: Boolean = false
         var catalogError: String? = null
@@ -839,6 +843,7 @@ class BridgeRepository(
         runtime.error = null
 
         val bridge = info.bridge
+        runtime.workspaceRoot = bridge?.workspaceRoot?.takeIf { it.isNotBlank() } ?: runtime.workspaceRoot
         val hostName = bridge?.hostName?.takeIf { it.isNotBlank() } ?: runtime.profile.hostName
         val deviceId = bridge?.deviceId?.takeIf { it.isNotBlank() } ?: runtime.profile.deviceId
         runtime.profile = runtime.profile.copy(
@@ -983,10 +988,11 @@ class BridgeRepository(
             val result = runCatching { client.workspaces() }
             if (runtimes[runtime.profile.id] !== runtime) return@launch
             result
-                .onSuccess { workspaces ->
+                .onSuccess { catalog ->
+                    runtime.workspaceRoot = catalog.root?.takeIf { it.isNotBlank() }
                     // 桌面端没有登记工作区时，用已知会话的目录兜底，
                     // 避免任务页一行都选不了。
-                    runtime.workspaces = workspaces.ifEmpty { workspacesFromSessions(runtime.sessions) }
+                    runtime.workspaces = catalog.workspaces.ifEmpty { workspacesFromSessions(runtime.sessions) }
                     runtime.catalogError = null
                 }
                 .onFailure { error ->
@@ -1004,6 +1010,38 @@ class BridgeRepository(
             .mapNotNull { it.cwd?.takeIf { cwd -> cwd.isNotBlank() } }
             .distinct()
             .map { cwd -> Workspace(id = CWD_PREFIX + cwd, path = cwd) }
+
+    /**
+     * 在主机设置的默认工作区目录下建一个新文件夹并登记成工作区。
+     * 主机没配默认目录时这里会直接失败，错误文案由主机给出。
+     */
+    suspend fun createWorkspace(name: String): Result<Workspace> {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return Result.failure(IOException("先给文件夹起个名字"))
+        val runtime = activeRuntime() ?: return Result.failure(IOException("还没有连接主机"))
+        val client = runtime.client ?: return Result.failure(IOException("连接已断开，稍后重试"))
+        return runCatching { client.createWorkspace(trimmed) }
+            .onSuccess { workspace ->
+                runtime.workspaces = (listOf(workspace) + runtime.workspaces.filter { it.id != workspace.id })
+                refreshWorkspaces(runtime)
+            }
+    }
+
+    /** 历史图片的内存缓存：一张聊天截图几百 KB，24 MB 够翻几十屏。 */
+    private val imageCache = object : LruCache<String, ByteArray>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ByteArray): Int = value.size
+    }
+
+    /** 取一条消息里第 [index] 张图片的原始字节；同一张图重复显示只下载一次。 */
+    suspend fun imageBytes(sessionId: String, seq: Long, index: Int): ByteArray {
+        val key = "$sessionId|$seq|$index"
+        imageCache.get(key)?.let { return it }
+        val runtime = activeRuntime() ?: throw IOException("还没有连接主机")
+        val client = runtime.client ?: throw IOException("连接已断开，稍后重试")
+        val bytes = client.imageBytes(sessionId, seq, index)
+        imageCache.put(key, bytes)
+        return bytes
+    }
 
     private fun refreshPresets(runtime: Runtime) {
         val client = runtime.client ?: return
@@ -1348,6 +1386,7 @@ class BridgeRepository(
             streamText = active?.streamText.orEmpty(),
             pending = active?.pending ?: PendingState(),
             workspaces = active?.workspaces.orEmpty(),
+            workspaceRoot = active?.workspaceRoot,
             presets = active?.presets ?: PresetCatalog(),
             catalogLoading = active?.catalogLoading ?: false,
             catalogError = active?.catalogError,
@@ -1370,6 +1409,7 @@ class BridgeRepository(
                 connection = runtime.connection,
                 sessions = runtime.sessions,
                 pending = runtime.pending,
+                error = runtime.error,
                 assistantTexts = runtime.assistantTexts.toMap()
             )
         }

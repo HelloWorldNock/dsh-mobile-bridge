@@ -20,6 +20,36 @@ export function textOfContent(content) {
   return parts.join('\n')
 }
 
+/**
+ * Durable image references inside one content array, in display order.
+ * The position is the only handle the phone gets, so the timeline projection and
+ * the byte route below must walk the content in exactly this order.
+ */
+export function imageRefsOf(content) {
+  if (!Array.isArray(content)) return []
+  const refs = []
+  for (const block of content) {
+    if (block === null || typeof block !== 'object') continue
+    if (block.type !== 'image') continue
+    const ref = block.attachment
+    if (ref === null || typeof ref !== 'object' || typeof ref.attachmentId !== 'string') continue
+    refs.push(ref)
+  }
+  return refs
+}
+
+/** Image metadata for the phone: index, media type, size. Bytes are fetched separately. */
+export function imagePartsOf(content) {
+  return imageRefsOf(content).map((ref, index) => ({
+    index,
+    mediaType: typeof ref.mediaType === 'string' ? ref.mediaType : 'image/jpeg',
+    name: typeof ref.name === 'string' ? clip(ref.name, 120) : null,
+    width: Number.isFinite(ref.width) ? ref.width : null,
+    height: Number.isFinite(ref.height) ? ref.height : null,
+    bytes: Number.isFinite(ref.bytes) ? ref.bytes : null
+  }))
+}
+
 export function titleOf(projections) {
   const value = projections?.values?.title
   if (typeof value === 'string') return value
@@ -90,7 +120,10 @@ export function projectEvent(event) {
 
   if (event.type === 'user/message') {
     const text = textOfContent(data.content)
-    if (text.trim() === '') return null
+    const images = imagePartsOf(data.content)
+    // An image-only message is still a message: dropping it made the phone look
+    // like it never sent anything.
+    if (text.trim() === '' && images.length === 0) return null
     const sourceKind = typeof data.source?.kind === 'string' ? data.source.kind : null
     // Runtime context, skill catalogs and time hints are injected as user messages
     // but are not part of the human conversation.
@@ -99,21 +132,24 @@ export function projectEvent(event) {
       ...base,
       kind: 'user',
       text: clip(text),
-      sourceKind
+      sourceKind,
+      images
     }
   }
 
   if (event.type === 'assistant/message') {
     const message = data.message !== null && typeof data.message === 'object' ? data.message : {}
     const text = textOfContent(message.content)
-    if (text.trim() === '') return null
+    const images = imagePartsOf(message.content)
+    if (text.trim() === '' && images.length === 0) return null
     return {
       ...base,
       kind: 'assistant',
       turn: data.turn,
       step: data.step,
       text: clip(text),
-      interrupted: data.interrupted === true
+      interrupted: data.interrupted === true,
+      images
     }
   }
 

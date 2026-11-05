@@ -133,6 +133,20 @@ data class PendingState(
     val questions: List<PendingQuestion> = emptyList()
 )
 
+/**
+ * 一条消息里的图片。主机把图片落成内容寻址的附件，时间线只下发元数据，
+ * 真正字节要按 (sessionId, seq, index) 再取一次。
+ */
+@Serializable
+data class TimelineImage(
+    val index: Int = 0,
+    val mediaType: String? = null,
+    val name: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val bytes: Long? = null
+)
+
 @Serializable
 data class TimelineItem(
     val seq: Long = 0,
@@ -149,7 +163,8 @@ data class TimelineItem(
     val reason: String? = null,
     val title: String? = null,
     val isError: Boolean = false,
-    val interrupted: Boolean = false
+    val interrupted: Boolean = false,
+    val images: List<TimelineImage> = emptyList()
 )
 
 @Serializable
@@ -176,7 +191,14 @@ data class Workspace(
 
 @Serializable
 data class WorkspaceList(
-    val workspaces: List<Workspace> = emptyList()
+    val workspaces: List<Workspace> = emptyList(),
+    val root: String? = null
+)
+
+@Serializable
+data class WorkspaceResponse(
+    val workspace: Workspace,
+    val root: String? = null
 )
 
 @Serializable
@@ -217,7 +239,8 @@ data class BridgeHost(
     val port: Int? = null,
     val discoveryPort: Int? = null,
     val clients: Int = 0,
-    val endpoints: List<BridgeEndpoint> = emptyList()
+    val endpoints: List<BridgeEndpoint> = emptyList(),
+    val workspaceRoot: String? = null
 )
 
 @Serializable

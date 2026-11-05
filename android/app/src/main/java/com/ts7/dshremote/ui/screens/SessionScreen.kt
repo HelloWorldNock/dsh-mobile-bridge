@@ -1,6 +1,9 @@
 package com.ts7.dshremote.ui.screens
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,6 +42,7 @@ import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -59,7 +64,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -67,9 +75,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.ts7.dshremote.data.AppState
 import com.ts7.dshremote.data.BridgeRepository
 import com.ts7.dshremote.data.SessionPrefs
+import com.ts7.dshremote.data.TimelineImage
 import com.ts7.dshremote.data.TimelineItem
 import com.ts7.dshremote.ui.ApprovalCard
 import com.ts7.dshremote.ui.QuestionCard
@@ -130,6 +140,12 @@ fun SessionScreen(
     var renameText by remember(session?.id) { mutableStateOf(session?.title.orEmpty()) }
     var planActive by remember(session?.id) { mutableStateOf(session?.plan?.active == true) }
     var acting by remember { mutableStateOf(false) }
+    /** 点开的图片。整屏查看复用同一份已下载字节。 */
+    var viewer by remember { mutableStateOf<Pair<TimelineItem, TimelineImage>?>(null) }
+    val imageSessionId = state.activeSessionId ?: state.detail?.session?.id
+    val imageLoader: suspend (String, Long, Int) -> ByteArray = remember(repository) {
+        { sessionId, seq, index -> repository.imageBytes(sessionId, seq, index) }
+    }
     val pickImages = com.ts7.dshremote.ui.rememberImagePicker(
         onImages = { picked ->
             images = (images + picked).take(com.ts7.dshremote.data.ImagePayload.MAX_IMAGES)
@@ -243,7 +259,12 @@ fun SessionScreen(
                 }
                 items(rows) { row ->
                     when (row) {
-                        is TimelineRowModel.Single -> TimelineRow(row.item)
+                        is TimelineRowModel.Single -> TimelineRow(
+                            item = row.item,
+                            sessionId = imageSessionId,
+                            loadImage = imageLoader,
+                            onOpenImage = { item, image -> viewer = item to image }
+                        )
                         is TimelineRowModel.Tools -> {
                             val key = row.items.firstOrNull()?.seq ?: row.items.first().hashCode().toLong()
                             ToolGroupRow(
@@ -298,6 +319,16 @@ fun SessionScreen(
                         }
                     }, busy = acting)
                 }
+            }
+
+            viewer?.let { (item, image) ->
+                ImageViewerDialog(
+                    item = item,
+                    image = image,
+                    sessionId = imageSessionId,
+                    loadImage = imageLoader,
+                    onDismiss = { viewer = null }
+                )
             }
 
             if (state.pendingCount > 0 && approval == null && question == null) {
@@ -600,7 +631,12 @@ private fun ToolGroupRow(items: List<TimelineItem>, expanded: Boolean, onToggle:
 }
 
 @Composable
-private fun TimelineRow(item: TimelineItem) {
+private fun TimelineRow(
+    item: TimelineItem,
+    sessionId: String? = null,
+    loadImage: (suspend (String, Long, Int) -> ByteArray)? = null,
+    onOpenImage: (TimelineItem, TimelineImage) -> Unit = { _, _ -> }
+) {
     when (item.kind) {
         "user" -> Row(
             Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -611,14 +647,30 @@ private fun TimelineRow(item: TimelineItem) {
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.widthIn(max = 320.dp)
             ) {
-                // 长按气泡即可选词：SelectionContainer 给系统选择手柄和「复制/全选」菜单。
-                SelectionContainer {
-                    Text(
-                        item.text.orEmpty(),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextPrimary,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                Column(
+                    modifier = Modifier.padding(
+                        horizontal = if (item.images.isEmpty()) 14.dp else 10.dp,
+                        vertical = if (item.images.isEmpty()) 10.dp else 10.dp
                     )
+                ) {
+                    if (item.images.isNotEmpty()) {
+                        MessageImages(item, sessionId, loadImage, onOpenImage)
+                    }
+                    if (!item.text.isNullOrBlank()) {
+                        // 长按气泡即可选词：SelectionContainer 给系统选择手柄和「复制/全选」菜单。
+                        SelectionContainer {
+                            Text(
+                                item.text.orEmpty(),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = TextPrimary,
+                                modifier = Modifier.padding(
+                                    start = if (item.images.isEmpty()) 0.dp else 4.dp,
+                                    end = if (item.images.isEmpty()) 0.dp else 4.dp,
+                                    top = if (item.images.isEmpty()) 0.dp else 8.dp
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -628,13 +680,29 @@ private fun TimelineRow(item: TimelineItem) {
                 shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.widthIn(max = 340.dp)
             ) {
-                SelectionContainer {
-                    Text(
-                        item.text.orEmpty() + if (item.interrupted) "\n\n[已中断]" else "",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = TextPrimary,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                Column(
+                    modifier = Modifier.padding(
+                        horizontal = if (item.images.isEmpty()) 14.dp else 10.dp,
+                        vertical = 10.dp
                     )
+                ) {
+                    if (item.images.isNotEmpty()) {
+                        MessageImages(item, sessionId, loadImage, onOpenImage)
+                    }
+                    if (!item.text.isNullOrBlank() || item.interrupted) {
+                        SelectionContainer {
+                            Text(
+                                item.text.orEmpty() + if (item.interrupted) "\n\n[已中断]" else "",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = TextPrimary,
+                                modifier = Modifier.padding(
+                                    start = if (item.images.isEmpty()) 0.dp else 4.dp,
+                                    end = if (item.images.isEmpty()) 0.dp else 4.dp,
+                                    top = if (item.images.isEmpty()) 0.dp else 8.dp
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -702,6 +770,152 @@ private fun TimelineRow(item: TimelineItem) {
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
         )
         else -> Unit
+    }
+}
+
+/** 取一条消息里第 index 张图的像素。失败（断线、过期、解码不了）统一给 null。 */
+private suspend fun loadMessageBitmap(
+    sessionId: String?,
+    seq: Long,
+    index: Int,
+    loadImage: (suspend (String, Long, Int) -> ByteArray)?
+): Bitmap? {
+    val session = sessionId ?: return null
+    val loader = loadImage ?: return null
+    val bytes = runCatching { loader(session, seq, index) }.getOrNull() ?: return null
+    return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull()
+}
+
+/** 消息气泡里的图片：单张铺一行，多张按两列排。 */
+@Composable
+private fun MessageImages(
+    item: TimelineItem,
+    sessionId: String?,
+    loadImage: (suspend (String, Long, Int) -> ByteArray)?,
+    onOpen: (TimelineItem, TimelineImage) -> Unit
+) {
+    val columns = if (item.images.size == 1) 1 else 2
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        item.images.chunked(columns).forEach { line ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                line.forEach { image ->
+                    MessageImageThumb(
+                        item = item,
+                        image = image,
+                        sessionId = sessionId,
+                        loadImage = loadImage,
+                        onOpen = onOpen,
+                        width = if (columns == 1) 236.dp else 138.dp
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageImageThumb(
+    item: TimelineItem,
+    image: TimelineImage,
+    sessionId: String?,
+    loadImage: (suspend (String, Long, Int) -> ByteArray)?,
+    onOpen: (TimelineItem, TimelineImage) -> Unit,
+    width: androidx.compose.ui.unit.Dp
+) {
+    var bitmap by remember(item.seq, image.index) { mutableStateOf<Bitmap?>(null) }
+    var failed by remember(item.seq, image.index) { mutableStateOf(false) }
+    LaunchedEffect(item.seq, image.index, sessionId) {
+        failed = false
+        val decoded = loadMessageBitmap(sessionId, item.seq, image.index, loadImage)
+        if (decoded == null) failed = true else bitmap = decoded
+    }
+    val shown = bitmap
+    Box(
+        Modifier
+            .width(width)
+            .heightIn(max = 260.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x14000000))
+            .clickable(enabled = shown != null) { onOpen(item, image) },
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            shown != null -> Image(
+                bitmap = shown.asImageBitmap(),
+                contentDescription = image.name ?: "图片",
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier.fillMaxWidth()
+            )
+            failed -> Text(
+                "图片加载失败",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted,
+                modifier = Modifier.padding(vertical = 22.dp)
+            )
+            else -> CircularProgressIndicator(
+                modifier = Modifier.padding(vertical = 22.dp).size(18.dp),
+                strokeWidth = 2.dp,
+                color = Amber
+            )
+        }
+    }
+}
+
+/** 点缩略图后的整屏查看：点任意位置关闭。 */
+@Composable
+private fun ImageViewerDialog(
+    item: TimelineItem,
+    image: TimelineImage,
+    sessionId: String?,
+    loadImage: (suspend (String, Long, Int) -> ByteArray)?,
+    onDismiss: () -> Unit
+) {
+    var bitmap by remember(item.seq, image.index) { mutableStateOf<Bitmap?>(null) }
+    var failed by remember(item.seq, image.index) { mutableStateOf(false) }
+    LaunchedEffect(item.seq, image.index, sessionId) {
+        failed = false
+        val decoded = loadMessageBitmap(sessionId, item.seq, image.index, loadImage)
+        if (decoded == null) failed = true else bitmap = decoded
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(Ink)
+                .clickable(onClick = onDismiss)
+                .padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            val shown = bitmap
+            when {
+                shown != null -> Image(
+                    bitmap = shown.asImageBitmap(),
+                    contentDescription = image.name ?: "图片",
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)
+                )
+                failed -> Text(
+                    "图片加载失败",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextMuted,
+                    modifier = Modifier.padding(vertical = 40.dp)
+                )
+                else -> CircularProgressIndicator(
+                    modifier = Modifier.padding(vertical = 40.dp),
+                    color = Amber
+                )
+            }
+            Text(
+                listOfNotNull(
+                    image.name,
+                    image.width?.let { w -> image.height?.let { h -> "$w×$h" } }
+                ).joinToString(" · ").ifBlank { "点按关闭" },
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted,
+                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+            )
+        }
     }
 }
 

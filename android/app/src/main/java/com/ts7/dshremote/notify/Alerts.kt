@@ -164,13 +164,22 @@ object Alerts {
         notify(context, "test".hashCode() and 0x7fffffff, notification)
     }
 
-    fun connectionLost(context: Context, hostLabel: String) {
+    /**
+     * 连接断开。传进来的 [reason] 来自数据层：两条通道都失败时是
+     * 「局域网和 Tailscale 地址均不可达」，标题会直说两条路都不通，
+     * 免得用户以为是某一条线路的问题。
+     */
+    fun connectionLost(context: Context, hostLabel: String, reason: String? = null) {
+        val both = reason?.contains("均不可达") == true
         val notification = NotificationCompat.Builder(context, CHANNEL_CONNECTION)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("$hostLabel 的连接已断开")
-            .setContentText("点按返回应用重试")
+            .setContentTitle(
+                if (both) "局域网和 Tailscale 都连不上 · $hostLabel" else "$hostLabel 的连接已断开"
+            )
+            .setContentText(reason?.takeIf { it.isNotBlank() } ?: "点按返回应用重试")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(reason?.takeIf { it.isNotBlank() } ?: "点按返回应用重试"))
             .setContentIntent(openIntent(context, null, null, null, 6))
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(if (both) NotificationCompat.PRIORITY_DEFAULT else NotificationCompat.PRIORITY_LOW)
             .setAutoCancel(true)
             .build()
         notify(context, ("offline:" + hostLabel).hashCode() and 0x7fffffff, notification)

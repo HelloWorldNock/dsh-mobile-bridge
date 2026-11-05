@@ -27,6 +27,8 @@ data class HostSnapshot(
     val connection: ConnectionState = ConnectionState.Disconnected,
     val sessions: List<SessionSummary> = emptyList(),
     val pending: PendingState = PendingState(),
+    /** 最近一次连接失败的原因，「局域网和 Tailscale 地址均不可达」就是双通道都断。 */
+    val error: String? = null,
     val assistantTexts: Map<String, String> = emptyMap()
 )
 
@@ -53,6 +55,8 @@ data class AppState(
     val streamText: String = "",
     val pending: PendingState = PendingState(),
     val workspaces: List<Workspace> = emptyList(),
+    /** 桌面端设置的默认工作区目录；非空时手机可以在这里新建工作区文件夹。 */
+    val workspaceRoot: String? = null,
     val presets: PresetCatalog = PresetCatalog(),
     val catalogLoading: Boolean = false,
     val catalogError: String? = null,

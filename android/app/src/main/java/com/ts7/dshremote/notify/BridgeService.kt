@@ -53,6 +53,8 @@ class BridgeService : Service() {
     private var foregroundText: String? = null
     private var lastHosts: List<HostSnapshot> = emptyList()
     private val announced = mutableMapOf<String, Long>()
+    /** 掉线复核任务：key 是 host id。 */
+    private val lostChecks = mutableMapOf<String, Job>()
 
     override fun onCreate() {
         super.onCreate()
@@ -222,8 +224,9 @@ class BridgeService : Service() {
         for (host in hosts) {
             val previous = previousConnections[host.id]
             if (previous == ConnectionState.Connected && host.connection != ConnectionState.Connected) {
-                Alerts.connectionLost(this, host.label)
+                scheduleLostCheck(host)
             } else if (previous != ConnectionState.Connected && host.connection == ConnectionState.Connected) {
+                lostChecks.remove(host.id)?.cancel()
                 Alerts.cancelConnectionLost(this, host.label)
             }
         }
@@ -266,5 +269,25 @@ class BridgeService : Service() {
             }
         }
         previousRunning = runningByHost
+    }
+
+    /**
+     * 掉线不立刻发通知。Wi-Fi 与移动数据来回切、进电梯、地铁出站这些场景都有一两秒的空窗，
+     * 立刻弹一条「连接已断开」纯属噪音；这里等 20 秒复查，真没连回来才算断。
+     */
+    private fun scheduleLostCheck(host: HostSnapshot) {
+        lostChecks.remove(host.id)?.cancel()
+        lostChecks[host.id] = scope.launch {
+            delay(LostCheckDelayMs)
+            val current = lastHosts.firstOrNull { it.id == host.id }
+            if (current == null || current.connection != ConnectionState.Connected) {
+                Alerts.connectionLost(this@BridgeService, host.label, current?.error ?: host.error)
+            }
+            lostChecks.remove(host.id)
+        }
+    }
+
+    private companion object {
+        const val LostCheckDelayMs = 20_000L
     }
 }

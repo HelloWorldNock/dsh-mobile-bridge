@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +72,9 @@ fun NewTaskScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var images by remember { mutableStateOf<List<com.ts7.dshremote.data.PromptImage>>(emptyList()) }
     var imageError by remember { mutableStateOf<String?>(null) }
+    /** 在默认工作区目录下新建文件夹时输入的名字。 */
+    var newFolder by remember { mutableStateOf("") }
+    var creatingFolder by remember { mutableStateOf(false) }
     val pickImages = com.ts7.dshremote.ui.rememberImagePicker(
         onImages = { picked ->
             images = (images + picked).take(com.ts7.dshremote.data.ImagePayload.MAX_IMAGES)
@@ -178,6 +183,63 @@ fun NewTaskScreen(
                         )
                     }
                 }
+            }
+
+            val workspaceRoot = state.workspaceRoot
+            if (workspaceRoot != null) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newFolder,
+                        onValueChange = { newFolder = it; error = null },
+                        placeholder = { Text("新建工作区文件夹") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        textStyle = MaterialTheme.typography.bodyMedium,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Amber,
+                            unfocusedBorderColor = Outline,
+                            focusedContainerColor = SurfaceRaised,
+                            unfocusedContainerColor = SurfaceRaised,
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            cursorColor = Amber
+                        )
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            val name = newFolder.trim()
+                            if (name.isEmpty() || creatingFolder) return@Button
+                            scope.launch {
+                                creatingFolder = true
+                                repository.createWorkspace(name)
+                                    .onSuccess { workspace ->
+                                        newFolder = ""
+                                        workspaceId = workspace.id
+                                    }
+                                    .onFailure { error = it.message ?: "新建文件夹失败" }
+                                creatingFolder = false
+                            }
+                        },
+                        enabled = newFolder.isNotBlank() && !creatingFolder && !creating,
+                        colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Ink)
+                    ) {
+                        if (creatingFolder) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Ink)
+                        } else {
+                            Text("新建")
+                        }
+                    }
+                }
+                Text(
+                    "会在 $workspaceRoot 下建同名文件夹，并直接选为本次任务的工作区。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
 
             SectionLabel("任务内容")

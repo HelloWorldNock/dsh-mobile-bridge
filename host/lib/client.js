@@ -225,6 +225,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
             planReviewTimeoutMs: data.settings.planReviewTimeoutMs || 180000,
             collabWorkspaceId: data.settings.collabWorkspaceId || "",
             collabRoot: data.settings.collabRoot || "",
+            workspaceRoot: data.settings.workspaceRoot || "",
           })
         } catch (cause) {
           setError(`${cause.message || "桥接未响应"}（${BASE}）`)
@@ -872,6 +873,23 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
                       onChange: (event) => setForm({ ...form, collabWorkspaceId: "", collabRoot: event.target.value }),
                     }),
                   ),
+                ),
+                h(
+                  "div",
+                  { className: "dmb-setting" },
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, "默认工作区目录"),
+                    h("div", { className: "hint" }, "手机新建任务时可以在这个目录下直接建新的工作区文件夹；留空表示手机端不能建。必须是已存在的绝对路径。"),
+                  ),
+                  h("input", {
+                    className: "dmb-input",
+                    style: { width: 300 },
+                    placeholder: "F:\\AgentWorkProject",
+                    value: form.workspaceRoot,
+                    onChange: (event) => setForm({ ...form, workspaceRoot: event.target.value }),
+                  }),
                 ),
                 h(
                   "div",
