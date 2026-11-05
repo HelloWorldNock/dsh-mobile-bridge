@@ -42,6 +42,9 @@ class BridgeRepository(
 
         /** 打开会话后顺手刷列表的新鲜度阈值，避免每次点开会话都多跑两个请求。 */
         private const val SESSION_REFRESH_FRESH_MS = 3_000L
+
+        /** 连上 tailnet 后隔一会儿再探局域网：太早会和首次连接的探测抢同一条链路。 */
+        private const val LAN_PROBE_DELAY_MS = 1_500L
     }
 
     private val appContext = context.applicationContext
@@ -71,6 +74,7 @@ class BridgeRepository(
         var client: BridgeClient? = null
         var connectJob: Job? = null
         var eventJob: Job? = null
+        var lanProbeJob: Job? = null
         var sessions: List<SessionSummary> = emptyList()
         var pending: PendingState = PendingState()
         var workspaces: List<Workspace> = emptyList()
@@ -223,10 +227,60 @@ class BridgeRepository(
         if (runtime.connectJob?.isActive == true) return
         if (runtime.profile.token.isBlank()) return
         if (runtime.connection == ConnectionState.Disconnected) return
-        val best = pickReachable(runtime) ?: return
+        val best = pickReachable(runtime, preferLan = true) ?: return
         if (normalizeBaseUrl(best.url) != normalizeBaseUrl(runtime.profile.baseUrl) ||
             runtime.connection != ConnectionState.Connected
         ) {
+            if (best.kind == Endpoints.LAN) promoteLan(runtime, best)
+            restart(runtime)
+        }
+    }
+
+    /**
+     * Put [endpoint] and every other LAN address in front of the stored order
+     * and keep it that way, so later cold starts dial the LAN first too.
+     */
+    private fun promoteLan(runtime: Runtime, endpoint: BridgeEndpoint) {
+        val ordered = Endpoints.merge(
+            baseUrl = endpoint.url,
+            existing = runtime.profile.endpoints,
+            incoming = emptyList(),
+            sort = true
+        )
+        if (ordered == runtime.profile.endpoints) return
+        runtime.profile = runtime.profile.copy(endpoints = ordered)
+        persist()
+    }
+
+    /**
+     * A host that was paired over Tailscale stores its tailnet address first,
+     * so every reconnect lands on the tailnet even when the phone is sitting on
+     * the same LAN as the desktop. Once such a connection is up, give the LAN
+     * one chance in the background and switch over if it answers; a LAN that
+     * never answers (a NAT'd VM, a phone on mobile data) costs one probe and
+     * nothing else, because the switch only happens on success.
+     */
+    private fun probeLanUpgrade(runtime: Runtime) {
+        val lan = runtime.profile.candidates.filter { it.kind == Endpoints.LAN }
+        if (lan.isEmpty()) return
+        runtime.lanProbeJob?.cancel()
+        runtime.lanProbeJob = scope.launch {
+            delay(LAN_PROBE_DELAY_MS)
+            // 首次连接后面还跟着一轮刷新，重启会把它们打断；等这轮跑完再探。
+            if (runtime.connectJob?.isActive == true) delay(LAN_PROBE_DELAY_MS)
+            if (runtimes[runtime.profile.id] !== runtime) return@launch
+            if (runtime.connection != ConnectionState.Connected) return@launch
+            if (runtime.endpointKind == Endpoints.LAN) return@launch
+            val token = runtime.profile.token
+            val hit = lan.firstOrNull { endpoint ->
+                try {
+                    matches(runtime, clientFor(endpoint, token, probeTimeout(endpoint.kind)).info())
+                } catch (_: Throwable) {
+                    false
+                }
+            } ?: return@launch
+            runtime.lanProbeJob = null
+            promoteLan(runtime, hit)
             restart(runtime)
         }
     }
@@ -293,9 +347,10 @@ class BridgeRepository(
         return expected == reported
     }
 
-    private suspend fun pickReachable(runtime: Runtime): BridgeEndpoint? {
+    private suspend fun pickReachable(runtime: Runtime, preferLan: Boolean = false): BridgeEndpoint? {
         val token = runtime.profile.token
-        for (endpoint in runtime.profile.candidates) {
+        val order = runtime.profile.candidates
+        for (endpoint in if (preferLan) Endpoints.preferLan(order) else order) {
             try {
                 val info = clientFor(endpoint, token, probeTimeout(endpoint.kind)).info()
                 if (matches(runtime, info)) return endpoint
@@ -703,8 +758,10 @@ class BridgeRepository(
     private fun restart(runtime: Runtime) {
         runtime.connectJob?.cancel()
         runtime.eventJob?.cancel()
+        runtime.lanProbeJob?.cancel()
         runtime.connectJob = null
         runtime.eventJob = null
+        runtime.lanProbeJob = null
         runtime.client = null
         runtime.pendingOpenSessionId = runtime.activeSessionId
         runtime.connection = ConnectionState.Connecting
@@ -798,6 +855,8 @@ class BridgeRepository(
         )
         persist()
         sync()
+
+        if (opened.endpoint.kind != Endpoints.LAN) probeLanUpgrade(runtime)
 
         refreshSessions(runtime.profile.id)
         refreshWorkspaces(runtime)
