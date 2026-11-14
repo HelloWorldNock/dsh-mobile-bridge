@@ -15,7 +15,7 @@ import { createLogSink, wrapLogger, startLogTee } from './logs.js'
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.8.7'
+const VERSION = '0.8.8'
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,

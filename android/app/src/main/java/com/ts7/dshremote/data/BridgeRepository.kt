@@ -751,6 +751,32 @@ class BridgeRepository(
         }
     }
 
+    /**
+     * 归档当前任务：写的是桌面端同一份 registry 归档集合，所以 PC 的任务列表也会同步隐藏，
+     * 日志保留；需要时可以在电脑上取消归档，会话会回到工作区原来的位置。
+     */
+    suspend fun archiveActiveSession(): Result<Unit> {
+        val runtime = activeRuntime() ?: return Result.failure(IllegalStateException("未连接"))
+        val id = runtime.activeSessionId ?: return Result.failure(IllegalStateException("没有打开任务"))
+        val client = runtime.client ?: return Result.failure(IllegalStateException("未连接"))
+        return runCatching {
+            client.archive(id)
+            runCatching { client.unsubscribe(id) }
+            runtime.sessions = runtime.sessions.filterNot { it.id == id }
+            runtime.activeSessionId = null
+            runtime.pendingOpenSessionId = null
+            runtime.detail = null
+            runtime.timeline = emptyList()
+            runtime.streamText = ""
+            runtime.assistantTexts.remove(id)
+            sync()
+            refreshSessions(runtime.profile.id)
+        }.onFailure { error ->
+            runtime.error = error.message ?: "归档失败"
+            sync()
+        }
+    }
+
     suspend fun renameSession(title: String): Result<Unit> {
         val runtime = activeRuntime() ?: return Result.failure(IllegalStateException("未连接"))
         val id = runtime.activeSessionId ?: return Result.failure(IllegalStateException("没有打开任务"))

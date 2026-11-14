@@ -21,6 +21,29 @@ function messageOf(error) {
   return String(error?.message ?? error)
 }
 
+/** 0.2.x 对「用普通 session 地址访问子代理会话」的拒绝。 */
+export function isSubagentAddressError(error) {
+  if (error?.code === 'session/agent-busy') return true
+  return messageOf(error).includes('durable parent address')
+}
+
+/**
+ * 把子代理会话解析成宿主要求的 durable parent 地址。
+ * mode 用 'unknown'：宿主只在 mode 不是 unknown 时才比对，父会话归属仍然校验。
+ */
+export async function subagentAddress(controller, sessionId, signal) {
+  try {
+    const value = await controller.list({}, signal)
+    const items = Array.isArray(value?.items) ? value.items : []
+    const summary = items.find((item) => item.sessionId === sessionId)
+    const parentSessionId = typeof summary?.parentSessionId === 'string' ? summary.parentSessionId : null
+    if (parentSessionId === null) return null
+    return { kind: 'subagent', parentSessionId, childSessionId: sessionId, mode: 'unknown' }
+  } catch {
+    return null
+  }
+}
+
 /**
  * @param {{ sessionController?: any }} ctx
  * @param {string} sessionId
@@ -43,27 +66,48 @@ export async function readSessionRecords(ctx, sessionId, options = {}) {
       failures.push(`${name}: 当前 DSH 没有这个方法`)
       continue
     }
-    try {
+    const attempt = async () => {
       // inspect(sessionId, signal) 与 page(request, signal) 的调用式不同，
       // 单独区分，别把请求对象塞进老签名。
-      const result = name === 'inspect' ? await fn.call(controller, sessionId, signal) : await fn.call(controller, request, signal)
-      const records = Array.isArray(result?.records)
-        ? result.records
-        : Array.isArray(result?.events)
-          ? result.events
-          : null
-      if (records === null) {
-        failures.push(`${name}: 返回里既没有 records 也没有 events`)
+      return name === 'inspect' ? await fn.call(controller, sessionId, signal) : await fn.call(controller, request, signal)
+    }
+    let result
+    try {
+      result = await attempt()
+    } catch (error) {
+      // 0.2.x：子代理会话不接受普通 session 地址，必须先换成 durable parent 地址。
+      if (request.address.kind === 'session' && isSubagentAddressError(error)) {
+        const alt = await subagentAddress(controller, sessionId, signal)
+        if (alt === null) {
+          failures.push(`${name}: ${messageOf(error)}（拿不到父会话，无法按子代理地址重试）`)
+          continue
+        }
+        request.address = alt
+        try {
+          result = await attempt()
+        } catch (retryError) {
+          failures.push(`${name}: ${messageOf(retryError)}（子代理地址）`)
+          continue
+        }
+      } else {
+        failures.push(`${name}: ${messageOf(error)}`)
         continue
       }
-      return {
-        records,
-        source: name,
-        hasMore: result?.hasMore === true,
-        cursor: Number.isFinite(result?.cursor) ? Number(result.cursor) : null
-      }
-    } catch (error) {
-      failures.push(`${name}: ${messageOf(error)}`)
+    }
+    const records = Array.isArray(result?.records)
+      ? result.records
+      : Array.isArray(result?.events)
+        ? result.events
+        : null
+    if (records === null) {
+      failures.push(`${name}: 返回里既没有 records 也没有 events`)
+      continue
+    }
+    return {
+      records,
+      source: name,
+      hasMore: result?.hasMore === true,
+      cursor: Number.isFinite(result?.cursor) ? Number(result.cursor) : null
     }
   }
   throw new Error(failures.join('; '))

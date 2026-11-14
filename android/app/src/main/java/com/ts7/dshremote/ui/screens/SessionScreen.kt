@@ -96,7 +96,7 @@ import com.ts7.dshremote.ui.theme.TextMuted
 import com.ts7.dshremote.ui.theme.TextPrimary
 import kotlinx.coroutines.launch
 
-private enum class SessionDialog { Rename, Permission, Plan, Stop, Delete }
+private enum class SessionDialog { Rename, Permission, Plan, Stop, Archive, Delete }
 
 /**
  * 贴底时额外滚动的像素量。简洁模式把大段工具调用压成一行，只滚到最后一项会把它
@@ -235,6 +235,7 @@ fun SessionScreen(
                             }
                         )
                         DropdownMenuItem(text = { Text("停止任务", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Stop })
+                        DropdownMenuItem(text = { Text("归档会话") }, onClick = { menuOpen = false; dialog = SessionDialog.Archive })
                         DropdownMenuItem(text = { Text("彻底删除", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Delete })
                     }
                 }
@@ -491,6 +492,24 @@ fun SessionScreen(
                         dialog = null
                     }
                 }) { Text("停止", color = Danger) }
+            },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("取消") } },
+            containerColor = SurfaceRaised,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
+        SessionDialog.Archive -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("归档这个任务？") },
+            text = { Text("归档后手机和电脑的任务列表都不再显示它，会话日志保留。需要时可以在电脑上取消归档，回到原来的位置。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        val archived = repository.archiveActiveSession().isSuccess
+                        dialog = null
+                        if (archived) onBack()
+                    }
+                }) { Text("归档") }
             },
             dismissButton = { TextButton(onClick = { dialog = null }) { Text("取消") } },
             containerColor = SurfaceRaised,

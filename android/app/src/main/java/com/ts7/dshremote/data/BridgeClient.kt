@@ -153,6 +153,15 @@ class BridgeClient(
         request("DELETE", "/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}")
     }
 
+    /** 归档：和桌面端共用 registry 的归档集合，双端同时从任务列表里隐藏。 */
+    suspend fun archive(id: String) {
+        request("POST", "/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/archive", "{}")
+    }
+
+    suspend fun unarchive(id: String) {
+        request("POST", "/api/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/unarchive", "{}")
+    }
+
     suspend fun rename(id: String, title: String) {
         request(
             "POST",

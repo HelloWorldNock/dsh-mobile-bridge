@@ -303,11 +303,26 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     return ids
   }
 
+  /**
+   * DSH 的归档是 registry 的全局集合：归档会话仍留在工作区的 `sessionIds` 里
+   * （取消归档要还原位置），所以只按 `sessionIds` 过滤会让 PC 上归档掉的会话
+   * 继续出现在手机列表里。归档集合是读内存的同步 getter，拿不到时按「没有归档」
+   * 处理，绝不能因此把整个列表清空。
+   */
+  function archivedSessionIdSet() {
+    try {
+      const value = ctx.workspaceRegistry?.archivedSessionIds
+      return new Set(Array.isArray(value) ? value : [])
+    } catch {
+      return new Set()
+    }
+  }
+
   async function listSummaries(signal) {
     const items = await allSummaries(signal)
     const visible = visibleSessionIds()
-    if (visible === null) return items
-    return items.filter((item) => visible.has(item.id))
+    const archived = archivedSessionIdSet()
+    return items.filter((item) => (visible === null || visible.has(item.id)) && !archived.has(item.id))
   }
 
   async function findSummary(sessionId) {
@@ -891,15 +906,18 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
 
     if (method === 'GET' && path === '/api/workspaces') {
       const list = typeof ctx.workspaceRegistry?.list === 'function' ? ctx.workspaceRegistry.list() : []
+      const archived = archivedSessionIdSet()
       sendJson(res, 200, {
         root: workspaceRoot(),
+        // 归档会话不参与分组：App 按 sessionIds 归组，留着它只会得到空分组。
         workspaces: list.map((workspace) => ({
           id: workspace.id,
           path: workspace.path,
           title: workspace.title,
           updatedAt: toEpochMillis(workspace.updatedAt),
-          sessionIds: workspace.sessionIds ?? []
-        }))
+          sessionIds: (workspace.sessionIds ?? []).filter((sessionId) => !archived.has(sessionId))
+        })),
+        archivedSessionIds: [...archived]
       })
       return
     }
@@ -926,7 +944,9 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       if (typeof registry?.create !== 'function') {
         throw new BridgeError('workspace/unavailable', '当前 Host 不能创建工作区', 503)
       }
-      let workspace = typeof registry.resolveByPath === 'function' ? registry.resolveByPath(target) : undefined
+      // resolveByPath 在 0.2.x 是 async：不 await 会拿到 Promise（恒真），
+      // 建目录与 registry.create 全被跳过，接口只剩下一个空 workspace。
+      let workspace = typeof registry.resolveByPath === 'function' ? await registry.resolveByPath(target) : undefined
       if (workspace === undefined || workspace === null) {
         if (existsSync(target)) {
           if (!statSync(target).isDirectory()) throw new BridgeError('workspace/exists', '已有同名文件', 409)
@@ -1175,6 +1195,33 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         broadcast.broadcast('session.removed', { sessionId })
         logger?.info?.(`[mobile-bridge] deleted session ${sessionId} (${removed.length} dirs)`)
         sendJson(res, 200, { deleted: true, filesRemoved: removed.length })
+        return
+      }
+
+      // 归档 / 取消归档：和 PC 端共用 registry 的全局归档集合，手机不再各存一份。
+      if (method === 'POST' && (action === 'archive' || action === 'unarchive')) {
+        const registry = ctx.workspaceRegistry
+        const archiving = action === 'archive'
+        const op = archiving ? 'archiveSession' : 'unarchiveSession'
+        if (typeof registry?.[op] !== 'function') {
+          throw new BridgeError('session/archive-unavailable', '当前 Host 不支持归档会话', 501)
+        }
+        const summary = await findSummary(sessionId)
+        if (summary === null) throw new BridgeError('session/not-found', '会话不存在', 404)
+        try {
+          await registry[op](sessionId)
+        } catch (error) {
+          if (error?.name === 'WorkspaceActiveSessionError') {
+            throw new BridgeError('session/active', '会话正在运行，先停止再归档', 409)
+          }
+          if (error?.name === 'WorkspaceUnknownSessionError') {
+            throw new BridgeError('session/not-found', '会话不存在', 404)
+          }
+          throw new BridgeError('session/archive-failed', String(error?.message ?? error), 500)
+        }
+        // 归档集合本身不发事件，让 hub 立刻对一次账，手机端不用等下一轮轮询。
+        hub.syncArchive?.()
+        sendJson(res, 200, { archived: archiving })
         return
       }
 

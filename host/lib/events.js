@@ -1,4 +1,5 @@
 import { projectEvent, projectRecords, projectStreamFrame, serializeSummary } from './dto.js'
+import { isSubagentAddressError } from './history.js'
 
 const HEARTBEAT_MS = 20_000
 const SLOW_CLIENT_BYTES = 4 * 1024 * 1024
@@ -150,7 +151,8 @@ export function createSessionHub({ ctx, controller, broadcast, logger, onTurnEnd
       running: summaries.get(sessionId)?.running === true,
       lastAssistantText: '',
       turnStartedAt: null,
-      disposed: false
+      disposed: false,
+      retriedSubagent: false
     }
     follows.set(sessionId, state)
     void run(state)
@@ -215,42 +217,80 @@ broadcast.broadcast('session.updated', { session: known })
     }
   }
 
+  /** 普通会话用 session 地址；子代理会话在 0.2.x 只接受 durable parent 地址。 */
+  function addressFor(sessionId) {
+    const summary = summaries.get(sessionId)
+    if (summary?.origin === 'subagent' && typeof summary.parentSessionId === 'string') {
+      return {
+        kind: 'subagent',
+        parentSessionId: summary.parentSessionId,
+        childSessionId: sessionId,
+        mode: 'unknown'
+      }
+    }
+    return { kind: 'session', sessionId }
+  }
+
+  function onFrame(state, frame) {
+    if (frame.type === 'snapshot') {
+      state.running = summaries.get(state.sessionId)?.running === true
+      broadcast.broadcast('session.snapshot', {
+        sessionId: state.sessionId,
+        header: frame.header,
+        cursor: frame.cursor,
+        records: projectRecords(frame.records),
+        hasMore: frame.hasMore,
+        projections: frame.projections
+      })
+    } else if (frame.type === 'event') {
+      onEvent(state, frame.event)
+    } else if (frame.type === 'assistant-stream') {
+      broadcast.broadcast('assistant.delta', {
+        sessionId: state.sessionId,
+        frame: frame.frame,
+        item: projectStreamFrame(frame.frame)
+      })
+    }
+  }
+
+  async function drain(state, address) {
+    const frames = controller.follow(
+      { address, maxMessages: 80, assistantStream: true },
+      state.abort.signal
+    )
+    for await (const frame of frames) {
+      if (state.disposed) break
+      onFrame(state, frame)
+    }
+  }
+
   async function run(state) {
     try {
-      const frames = controller.follow(
-        {
-          address: { kind: 'session', sessionId: state.sessionId },
-          maxMessages: 80,
-          assistantStream: true
-        },
-        state.abort.signal
-      )
-      for await (const frame of frames) {
-        if (state.disposed) break
-        if (frame.type === 'snapshot') {
-          state.running = summaries.get(state.sessionId)?.running === true
-broadcast.broadcast('session.snapshot', {
-            sessionId: state.sessionId,
-            header: frame.header,
-            cursor: frame.cursor,
-            records: projectRecords(frame.records),
-            hasMore: frame.hasMore,
-            projections: frame.projections
-          })
-        } else if (frame.type === 'event') {
-          onEvent(state, frame.event)
-        } else if (frame.type === 'assistant-stream') {
-broadcast.broadcast('assistant.delta', {
-            sessionId: state.sessionId,
-            frame: frame.frame,
-            item: projectStreamFrame(frame.frame)
-          })
+      await drain(state, addressFor(state.sessionId))
+    } catch (error) {
+      let failure = error
+      // 冷启动时 summaries 可能还没这条会话的记录：命中子代理拒绝后补一次台账再重试。
+      if (!state.disposed && !state.abort.signal.aborted && !state.retriedSubagent && isSubagentAddressError(failure)) {
+        state.retriedSubagent = true
+        const summary = await refreshOne(state.sessionId).catch(() => undefined)
+        const parentSessionId = typeof summary?.parentSessionId === 'string' ? summary.parentSessionId : null
+        if (parentSessionId !== null) {
+          try {
+            await drain(state, {
+              kind: 'subagent',
+              parentSessionId,
+              childSessionId: state.sessionId,
+              mode: 'unknown'
+            })
+            return
+          } catch (retryError) {
+            failure = retryError
+          }
         }
       }
-    } catch (error) {
       if (!state.disposed && !state.abort.signal.aborted) {
-        logger?.warn?.(`[mobile-bridge] follow ${state.sessionId} ended: ${String(error?.message ?? error)}`)
-broadcast.broadcast('session.error', { sessionId: state.sessionId, message: String(error?.message ?? error) })
+        logger?.warn?.(`[mobile-bridge] follow ${state.sessionId} ended: ${String(failure?.message ?? failure)}`)
+broadcast.broadcast('session.error', { sessionId: state.sessionId, message: String(failure?.message ?? failure) })
       }
     } finally {
       if (follows.get(state.sessionId) === state) follows.delete(state.sessionId)
@@ -277,6 +317,74 @@ broadcast.broadcast('session.error', { sessionId: state.sessionId, message: Stri
     const summary = value.items.find((item) => item.sessionId === sessionId)
     return summary === undefined ? undefined : cacheSummary(summary)
   }
+
+  /**
+   * Workspace registry 的归档集合没有事件：归档会话仍留在工作区的 `sessionIds`
+   * 里（取消归档要还原位置），所以「列表接口排除它」只解决拉取时的正确性。
+   * 手机停在列表页、或正开着那个会话时，还得把变化翻成 `session.removed` /
+   * `session.added` 推下去，双端才算真同步。集合是内存里的数组，轮询成本可忽略。
+   */
+  const ARCHIVE_POLL_MS = 3_000
+  let archiveSignature = null
+
+  function archivedIds() {
+    try {
+      const value = ctx.workspaceRegistry?.archivedSessionIds
+      return Array.isArray(value) ? value : null
+    } catch {
+      // registry 还没就绪：这一轮当作「读不到」，不要推翻已建立的基线。
+      return null
+    }
+  }
+
+  function syncArchive() {
+    const ids = archivedIds()
+    if (ids === null) return false
+    const signature = ids.join('\u0000')
+    if (archiveSignature === null) {
+      archiveSignature = signature
+      return false
+    }
+    if (signature === archiveSignature) return false
+    const before = new Set(archiveSignature === '' ? [] : archiveSignature.split('\u0000'))
+    archiveSignature = signature
+    const after = new Set(ids)
+    let changed = false
+    for (const id of after) {
+      if (before.has(id)) continue
+      changed = true
+      summaries.delete(id)
+      const state = follows.get(id)
+      if (state !== undefined) {
+        state.disposed = true
+        state.abort.abort()
+        follows.delete(id)
+      }
+      broadcast.broadcast('session.removed', { sessionId: id, archived: true })
+    }
+    for (const id of before) {
+      if (after.has(id)) continue
+      changed = true
+      const known = summaries.get(id)
+      if (known !== undefined) {
+        broadcast.broadcast('session.added', { session: known })
+        continue
+      }
+      void refreshOne(id)
+        .then((item) => {
+          if (item !== undefined) broadcast.broadcast('session.added', { session: item })
+        })
+        .catch(() => undefined)
+    }
+    return changed
+  }
+
+  // 先立基线：启动时已经归档的会话不该被当成「刚刚写了归档」再推一轮。
+  syncArchive()
+  const archiveTimer = setInterval(() => {
+    syncArchive()
+  }, ARCHIVE_POLL_MS)
+  archiveTimer.unref?.()
 
   const offs = []
   offs.push(
@@ -338,6 +446,7 @@ broadcast.broadcast('session.error', { sessionId, message })
   )
 
   function dispose() {
+    clearInterval(archiveTimer)
     for (const off of offs) {
       try {
         off()
@@ -352,5 +461,5 @@ broadcast.broadcast('session.error', { sessionId, message })
     follows.clear()
   }
 
-  return { ensureFollow, subscribe, unsubscribe, cacheSummary, summaries, dispose, follows }
+  return { ensureFollow, subscribe, unsubscribe, cacheSummary, summaries, dispose, follows, syncArchive }
 }

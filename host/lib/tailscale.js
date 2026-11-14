@@ -349,10 +349,16 @@ export function createTailscale({
 
     let spawned
     try {
+      // tsnet 会读 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 去连控制面和 DERP。宿主机把
+      // 这些变量指向本地代理后，控制面还能过，DERP 中继和数据面就很容易断——表现
+      // 就是手机上设备“在线”但连不上。把 tailnet 网段和 tailscale 域名排除掉。
+      const noProxy = ['localhost', '127.0.0.1', '::1', '100.64.0.0/10', '.tailscale.com', '.ts.net', '.tailscale.io']
+      const inherited = typeof process.env.NO_PROXY === 'string' ? process.env.NO_PROXY : ''
+      const mergedNoProxy = [...new Set([...noProxy, ...inherited.split(',').map((item) => item.trim()).filter((item) => item !== '')])].join(',')
       spawned = spawn(binary, args, {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, TS_AUTHKEY: authKey }
+        env: { ...process.env, NO_PROXY: mergedNoProxy, no_proxy: mergedNoProxy, TS_AUTHKEY: authKey }
       })
     } catch (error) {
       status.running = false

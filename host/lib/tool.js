@@ -133,10 +133,19 @@ export function createCollabTool({ collab }) {
 
 /** 把工具挂到 Host 上：`tools` 服务不一定在，所以两种注册路径都试。 */
 export function registerCollabTool({ ctx, tool, logger }) {
+  // 宿主把未在 `inject` 里声明的服务做成严格代理：读 `scope.tools` 会直接抛
+  // `cannot get property "tools" without inject`，而不是返回 undefined。这一句
+  // 以前裸写在箭头函数里，抛出去就把整个 apply 的启动链打断了，所以必须自己兜住。
   const attempt = (scope) => {
-    if (typeof scope?.tools?.register !== 'function') return false
+    let tools
     try {
-      scope.tools.register(tool)
+      tools = scope?.tools
+    } catch {
+      return false
+    }
+    if (typeof tools?.register !== 'function') return false
+    try {
+      tools.register(tool)
       return true
     } catch (error) {
       logger?.warn?.(`[mobile-bridge] collab tool registration failed: ${String(error?.message ?? error)}`)
@@ -144,9 +153,15 @@ export function registerCollabTool({ ctx, tool, logger }) {
     }
   }
   if (attempt(ctx)) return true
-  if (typeof ctx?.inject === 'function') {
+  let inject = null
+  try {
+    inject = typeof ctx?.inject === 'function' ? ctx.inject : null
+  } catch {
+    inject = null
+  }
+  if (inject !== null) {
     try {
-      ctx.inject(['tools'], (scope) => {
+      inject.call(ctx, ['tools'], (scope) => {
         if (!attempt(scope)) logger?.warn?.('[mobile-bridge] collab tool: tools service without register()')
       })
       return true

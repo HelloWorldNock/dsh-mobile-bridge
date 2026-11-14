@@ -1144,7 +1144,10 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       return h("div", { className: "dmb-embedded" }, h(PanelBody, { embedded: true }))
     }
 
-    function SafeSettingsCard() {
+    function SafeSettingsCard(props) {
+      // settings.plugins.tab 会为每个 tab 渲染一次 slot，并传入 { only: 该 tab 的 id }。
+      const only = props?.only
+      if (typeof only === "string" && only !== "dsh-mobile-bridge") return null
       return h(Guard, { fallback: (error) => h(ErrorPanel, { error }) }, h(SettingsCard))
     }
 
@@ -1161,14 +1164,16 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
           SafeSidebarAction,
         ),
       )
-      ctx.slots.inject("settings.plugin.item", () =>
+      // 0.2.x 的「设置 → 内置插件」列表里，单插件视图是 settings.plugins.tab；
+      // 旧的 settings.plugin.item 已经没有声明者了。
+      ctx.slots.inject("settings.plugins.tab", () =>
         ctx.slots.register(
           {
-            name: "settings.plugin.item",
-            id: "dsh-mobile-bridge-settings",
-            key: "dsh-mobile-bridge",
+            name: "settings.plugins.tab",
+            id: "dsh-mobile-bridge",
             order: 50,
-            inject: () => ({}),
+            label: "dsh-mobile-bridge",
+            inject: (props) => ({ only: props?.only ?? null }),
           },
           SafeSettingsCard,
         ),

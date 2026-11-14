@@ -6,7 +6,7 @@
 
 ## 功能
 
-- 任务列表：按桌面端工作区分组，默认全部收起（只看工作区名、会话数和运行中数量），点标题展开/收起；搜索时自动展开匹配的工作区，并匹配工作区、标题和目录
+- 任务列表：按桌面端工作区分组，默认全部收起（只看工作区名、会话数和运行中数量），点标题展开/收起；搜索时自动展开匹配的工作区，并匹配工作区、标题和目录；PC 端归档的会话不显示，归档状态变化会实时同步到手机
 - 多主机：同时配对并保持多台 DSH 的 SSE 连接，顶部主机胶囊一键切换；各主机的任务、审批和通知互不串台
 - 局域网/远程自动切换：电脑开启 Tailscale 时，插件同时广播局域网和 tailnet 地址；手机离开 Wi-Fi 自动改走 Tailscale，回到局域网自动切回直连
 - 内嵌 Tailscale（实验）：App 自带 userspace tsnet 节点，不占用系统 VPN，可与系统 Tailscale 或其他 VPN 共存；设置里一键随 App 启动/停止，只把本 App 的 DSH 流量送进 tailnet
@@ -93,7 +93,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.8.3.tgz（约 8.9 MB / 23 个文件，含 bin/tsnode-windows-amd64.exe）
+# → dist/dsh-mobile-bridge-0.8.8.tgz（约 9.0 MB / 29 个文件，含 bin/tsnode-windows-amd64.exe）
 ```
 
 包体积变大是因为从 0.8.0 起插件自带内嵌 Tailscale 节点程序；节点程序缺失时脚本只警告并提示先跑 `tools/build-tsnode.ps1`，但打包清单里缺它会直接失败。插件、APK 与 GitHub Release tag 现在用同一个版本号。
@@ -101,16 +101,16 @@ powershell -NoProfile -File tools/pack-plugin.ps1
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.3.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.8.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
 
-分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.3.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
+分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.8.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.8.3-debug.apk`。
+1. 安装 `dist/TS7-DSH-Remote-0.8.8-debug.apk`。
 2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
 3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`，并打开表单下方的「通过 Tailscale 连接」开关）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
@@ -225,9 +225,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-tsnode.ps1 -Goos
 
 DSH 桌面端的“删除会话”只是把会话从工作区导航里移除/归档，`session-persistence-jsonl` 没有删除 API，日志会一直留在 `$DSH_HOME/sessions` 下。
 
-桥接层做了两件事：
+桌面端的“归档”记在 workspace registry 的全局集合 `archivedSessionIds` 里，而归档会话**仍留在工作区的 `sessionIds` 中**（取消归档要还原原来的位置）。所以桥接层按两件事过滤和同步：
 
-- 任务列表只展示仍属于某个工作区 `sessionIds` 的会话，已移出工作区的旧会话默认不再返回。
+- 任务列表只返回仍属于某个工作区 `sessionIds`、且不在归档集合里的会话；`/api/workspaces` 的 `sessionIds` 同样剔掉归档会话（否则 App 按它分组会得到一个空分组），并在同一响应里给出 `archivedSessionIds`。
+- host 每 3 秒对一次归档集合（读的是 registry 内存数组，开销可忽略），新增归档广播 `session.removed`、取消归档广播 `session.added`。手机停在列表页、或正开着那个会话时都会立刻跟着消失/回来，不用重新进列表。
+
+归档在 PC 和手机之间是同一份状态：手机任务详情菜单的「归档会话」写的就是这个 registry 集合，电脑上的任务列表也会同步隐藏。彻底删除是另一条路：
+
 - `DELETE /api/sessions/:id` 会拒绝运行中的会话，以及仍驻留在 DSH 内存里的会话；通过检查后把会话从所有工作区 detach、取消归档、删除 `$DSH_HOME/sessions/*/<sessionId>` 目录，并广播 `session.removed`。
 
 App 的任务详情菜单里有“彻底删除”，删除后不可恢复。运行中的会话会拒绝删除；已打开过、仍驻留内存的会话会提示重启 DSH 后再删。
@@ -281,7 +285,7 @@ npm run check
 npm test
 ```
 
-当前 80 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话（`sessionId` 续跑、cwd 归位工作区、派发失败清理空会话）、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界（含派活不能越出协作工作区）、协作工作区配置（相对路径拒绝）、协作工作区下的文件列举与越界拒绝、组内委派（workspaceId 优先、cwd 回退、续跑、并发权限、缺失时报错）。
+当前 101 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话（`sessionId` 续跑、cwd 归位工作区、派发失败清理空会话）、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、归档会话过滤与工作区分组剔除、归档/取消归档接口与运行中拒绝、归档集合变化到 `session.removed`/`session.added` 的换算、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界（含派活不能越出协作工作区）、协作工作区配置（相对路径拒绝）、协作工作区下的文件列举与越界拒绝、组内委派（workspaceId 优先、cwd 回退、续跑、并发权限、缺失时报错）。
 
 MuMu 端到端已验证：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI、Q 版图标、过滤后的任务列表和 DSH 侧栏控制面板都实际跑过。
 
@@ -306,6 +310,8 @@ DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧�
 | GET | `/api/sessions?q=` | 任务列表 |
 | POST | `/api/sessions` | 创建任务，可带 prompt/plan/permission/images |
 | DELETE | `/api/sessions/:id` | 彻底删除会话日志（运行中拒绝） |
+| POST | `/api/sessions/:id/archive` | 归档会话（与桌面端同一份归档集合，运行中 409） |
+| POST | `/api/sessions/:id/unarchive` | 取消归档，会话回到工作区原位置 |
 | GET | `/api/sessions/:id` | 会话详情 + pending |
 | GET | `/api/sessions/:id/history` | 历史事件 |
 | POST | `/api/sessions/:id/{prompt,cancel,rename,permission,plan}` | 任务操作；prompt 可带 `images` |
@@ -355,8 +361,8 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.8.3-debug.apk`
-- `dist/dsh-mobile-bridge-0.8.3.tgz`
+- `dist/TS7-DSH-Remote-0.8.8-debug.apk`
+- `dist/dsh-mobile-bridge-0.8.8.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `README.md`

@@ -188,7 +188,14 @@ export function projectEvent(event) {
       kind: 'turn',
       phase: 'end',
       turn: data.turn,
-      reason: typeof data.reason === 'string' ? data.reason : null
+      // 0.2.x 的 turn/end.reason 是对象 { kind }（completed / aborted / error /
+      // max-tokens …）；老版本是字符串。两种都认。
+      reason:
+        typeof data.reason === 'string'
+          ? data.reason
+          : typeof data.reason?.kind === 'string'
+            ? data.reason.kind
+            : null
     }
   }
 
