@@ -578,7 +578,7 @@ class BridgeRepository(
             try {
                 runCatching { client.sessions() }.onSuccess { sessions ->
                     if (runtimes[runtime.profile.id] !== runtime) return@onSuccess
-                    val next = sort(sessions)
+                    val next = SessionSyncManager.sortSessions(sessions)
                     // 结构相等就不推新列表，省掉整页工作区分组的重算。
                     if (next == runtime.sessions) return@onSuccess
                     runtime.sessions = next
@@ -1339,26 +1339,18 @@ class BridgeRepository(
                     // Record assistant text for every followed session, not only the
                     // open one: the foreground service needs it for completion
                     // notifications while the phone is locked.
-                    if (item.kind == "assistant") {
-                        item.text?.takeIf { it.isNotBlank() }?.let {
-                            runtime.assistantTexts[envelope.sessionId] = it.take(4_000)
-                        }
+                    SessionSyncManager.assistantTextFor(item)?.let { text ->
+                        runtime.assistantTexts[envelope.sessionId] = text
                     }
                     if (runtime.activeSessionId != envelope.sessionId) {
                         syncSoon()
                         return
                     }
-                    val timeline = if (timelineContains(runtime.timeline, item.seq)) {
-                        runtime.timeline
-                    } else {
-                        runtime.timeline + item
-                    }
-                    val running = when {
-                        item.kind == "turn" && item.phase == "start" -> true
-                        item.kind == "turn" && item.phase == "end" -> false
-                        else -> runtime.detail?.session?.running ?: false
-                    }
-                    runtime.timeline = timeline
+                    runtime.timeline = SessionSyncManager.appendTimeline(runtime.timeline, item)
+                    val running = SessionSyncManager.runningAfterEvent(
+                        runtime.detail?.session?.running ?: false,
+                        item
+                    )
                     runtime.detail = runtime.detail?.let { detail ->
                         detail.copy(session = detail.session.copy(running = running))
                     }
@@ -1377,7 +1369,7 @@ class BridgeRepository(
                 "session.added", "session.updated" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionEnvelope.serializer(), event.data)
                     runtime.archivedSessionIds = runtime.archivedSessionIds - envelope.session.id
-                    runtime.sessions = upsertList(runtime.sessions, envelope.session)
+                    runtime.sessions = SessionSyncManager.upsertSession(runtime.sessions, envelope.session)
                     runtime.detail = runtime.detail?.let {
                         if (it.session.id == envelope.session.id) it.copy(session = envelope.session) else it
                     }
@@ -1387,7 +1379,7 @@ class BridgeRepository(
                     val envelope = JsonConfig.json.decodeFromString(StatusEnvelope.serializer(), event.data)
                     val replacement = envelope.session
                     runtime.sessions = if (replacement != null) {
-                        upsertList(runtime.sessions, replacement)
+                        SessionSyncManager.upsertSession(runtime.sessions, replacement)
                     } else {
                         runtime.sessions.map {
                             if (it.id == envelope.sessionId) it.copy(running = envelope.running) else it
@@ -1407,7 +1399,7 @@ class BridgeRepository(
                 }
                 "session.activity" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionIdEnvelope.serializer(), event.data)
-                    runtime.sessions = sort(runtime.sessions.map {
+                    runtime.sessions = SessionSyncManager.sortSessions(runtime.sessions.map {
                         if (it.id == envelope.sessionId) it.copy(updatedAt = envelope.updatedAt) else it
                     })
                     syncSoon()
@@ -1440,7 +1432,7 @@ class BridgeRepository(
                     runtime.pendingAddedAt[approval.id] = System.currentTimeMillis()
                     val before = runtime.pending
                     runtime.pending = runtime.pending.copy(
-                        approvals = upsertApproval(runtime.pending.approvals, approval)
+                        approvals = SessionSyncManager.upsertApproval(runtime.pending.approvals, approval)
                     )
                     if (before != runtime.pending) {
                         RunLog.info("pending", "推送审批 ${approval.toolName.ifBlank { "tool" }} · ${runtime.label}")
@@ -1452,7 +1444,7 @@ class BridgeRepository(
                     runtime.pendingAddedAt[question.id] = System.currentTimeMillis()
                     val before = runtime.pending
                     runtime.pending = runtime.pending.copy(
-                        questions = upsertQuestion(runtime.pending.questions, question)
+                        questions = SessionSyncManager.upsertQuestion(runtime.pending.questions, question)
                     )
                     if (before != runtime.pending) {
                         val kind = if (question.planReview) "计划审阅" else "提问"
@@ -1627,35 +1619,5 @@ class BridgeRepository(
         if (_pendingHosts.value != pendingHosts) _pendingHosts.value = pendingHosts
     }
 
-    private fun upsertList(list: List<SessionSummary>, session: SessionSummary): List<SessionSummary> {
-        val index = list.indexOfFirst { it.id == session.id }
-        if (index < 0) return sort(list + session)
-        val copy = list.toMutableList()
-        copy[index] = session
-        return sort(copy)
-    }
 
-    private fun upsertApproval(list: List<PendingApproval>, approval: PendingApproval): List<PendingApproval> {
-        val index = list.indexOfFirst { it.id == approval.id }
-        if (index < 0) return list + approval
-        val copy = list.toMutableList()
-        copy[index] = approval
-        return copy
-    }
-
-    private fun upsertQuestion(list: List<PendingQuestion>, question: PendingQuestion): List<PendingQuestion> {
-        val index = list.indexOfFirst { it.id == question.id }
-        if (index < 0) return list + question
-        val copy = list.toMutableList()
-        copy[index] = question
-        return copy
-    }
-
-    private fun timelineContains(items: List<TimelineItem>, seq: Long): Boolean {
-        if (seq <= 0) return false
-        return items.any { it.seq == seq }
-    }
-
-    private fun sort(items: List<SessionSummary>): List<SessionSummary> =
-        items.sortedWith(compareByDescending<SessionSummary> { it.updatedAt ?: 0L }.thenByDescending { it.id })
 }
