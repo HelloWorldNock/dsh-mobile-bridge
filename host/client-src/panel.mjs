@@ -1,4 +1,4 @@
-﻿/**
+/**
  * dsh-mobile-bridge — DSH client panel.
  *
  * The PC-side control surface lives inside DSH instead of a standalone web

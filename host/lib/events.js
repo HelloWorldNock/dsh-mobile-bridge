@@ -1,4 +1,4 @@
-﻿import { projectEvent, projectRecords, projectStreamFrame, serializeSummary } from './dto.js'
+import { projectEvent, projectRecords, projectStreamFrame, serializeSummary } from './dto.js'
 import { isSubagentAddressError } from './history.js'
 import { createSessionAdapter } from './adapters/dsh/session-adapter.js'
 import { createWorkspaceAdapter } from './adapters/dsh/workspace-adapter.js'

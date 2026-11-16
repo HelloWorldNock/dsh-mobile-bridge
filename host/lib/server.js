@@ -1,4 +1,4 @@
-﻿import http from 'node:http'
+import http from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'

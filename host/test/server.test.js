@@ -1254,3 +1254,25 @@ test('group routes report 503 when the host has no binding group', async () => {
     await app.close()
   }
 })
+
+test('rejects an over-long image list before creating a session, and keeps the error code', async () => {
+  const app = await boot()
+  try {
+    const rejected = await fetch(`${app.base}/api/sessions`, {
+      method: 'POST',
+      headers: authHeaders(app.token),
+      body: JSON.stringify({
+        workspaceId: 'w1',
+        prompt: 'x',
+        images: new Array(5).fill({ mediaType: 'image/png', data: 'AAAA' })
+      })
+    })
+    // 手机端按 code 分支：参数错误不能被包成 session/prompt-failed（那是派发失败）。
+    assert.equal(rejected.status, 400)
+    assert.equal((await rejected.json()).error.code, 'prompt/too-many-images')
+    // 校验失败不该留下空会话
+    assert.equal(app.created.length, 0)
+  } finally {
+    await app.close()
+  }
+})

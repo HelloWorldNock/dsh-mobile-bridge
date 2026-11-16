@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 /**
  * 把 `client-src/` 里的片段拼成浏览器 bundle `lib/client.js`（R22）。
  *

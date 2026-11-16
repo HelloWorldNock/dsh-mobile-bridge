@@ -1,4 +1,4 @@
-﻿package com.ts7.dshremote.data
+package com.ts7.dshremote.data
 
 import android.content.Context
 

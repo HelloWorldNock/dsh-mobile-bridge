@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 会话路由族（R21 第四刀）。
  *
  * 承接任务列表/新建、会话详情与动作（prompt / cancel / rename / permission / plan /
@@ -147,6 +147,12 @@ export function createSessionRoutes(api) {
       if (typeof body.agentPreset === 'string' && body.agentPreset !== '') request.agentPreset = body.agentPreset
       if (continueId === '') assertPeerWorkspace(identity, request)
       const warnings = []
+      // 先在**建会话之前**校验 prompt 与图片：参数错误要以 prompt/* 的错误码返回，
+      // 而且不能因此留下一个空会话（这正是会话越堆越多的主要原因）。
+      const text = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+      if (text.length > MAX_PROMPT_CHARS) throw new BridgeError('prompt/too-long', '内容过长', 400)
+      const hasPrompt = text !== '' || (Array.isArray(body.images) && body.images.length > 0)
+      const content = hasPrompt ? promptContent(text, body.images) : []
       const resumed = continueId !== ''
       let session
       if (resumed) {
@@ -177,9 +183,6 @@ export function createSessionRoutes(api) {
           warnings.push(`plan: ${String(error?.message ?? error)}`)
         }
       }
-      const text = typeof body.prompt === 'string' ? body.prompt.trim() : ''
-      if (text.length > MAX_PROMPT_CHARS) throw new BridgeError('prompt/too-long', '内容过长', 400)
-      const hasPrompt = text !== '' || (Array.isArray(body.images) && body.images.length > 0)
       if (hasPrompt) {
         try {
           await sessions.prompt(
@@ -187,7 +190,7 @@ export function createSessionRoutes(api) {
               requestId: randomUUID(),
               sessionId,
               mode: body.mode === 'steer' ? 'steer' : 'queue',
-              content: promptContent(text, body.images),
+              content,
               clientTimeZone: validTimeZone(body.clientTimeZone)
             },
             new AbortController().signal
