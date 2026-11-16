@@ -22,6 +22,7 @@ import {
 } from './services/prompt.js'
 import { clampLogLines, fileStamp, samePath, toEpochMillis } from './services/format.js'
 import { createWorkspaceRoutes } from './routes/workspaces.js'
+import { createSetupRoutes } from './routes/setup.js'
 import { createSessionAdapter } from './adapters/dsh/session-adapter.js'
 import { createWorkspaceAdapter } from './adapters/dsh/workspace-adapter.js'
 
@@ -567,6 +568,27 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     return typeof ctx.get === 'function' ? ctx.get(name) : ctx[name]
   }
 
+  const setupRoutes = createSetupRoutes({
+    isLoopback,
+    checkCsrf,
+    sendJson,
+    sendText,
+    readJson,
+    setupState,
+    logBundle,
+    tailscale,
+    updater,
+    auth,
+    group,
+    broadcast,
+    approvals,
+    onDiscoveryChange,
+    logger,
+    collabRoot,
+    collabWorkspace,
+    advertisedBaseUrl
+  })
+
   const workspaceRoutes = createWorkspaceRoutes({
     sendJson,
     readJson,
@@ -613,118 +635,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       throw new BridgeError('not-found', 'PC 控制端已改为 DSH 插件：请在 DSH 侧栏打开「手机远控」', 404)
     }
 
-    if (path.startsWith('/api/setup/')) {
-      if (!isLoopback(req)) throw new BridgeError('setup/forbidden', '设置接口仅允许本机访问', 403)
-      if (method === 'GET' && path === '/api/setup/state') {
-        sendJson(res, 200, await setupState())
-        return
-      }
-      if (method === 'GET' && path === '/api/setup/tailscale') {
-        sendJson(res, 200, { tailscale: tailscale?.status?.() ?? null })
-        return
-      }
-      // PC 面板的「导出运行日志」：本机回环 + 只读，返回可直接保存的 .log。
-      if (method === 'GET' && path === '/api/setup/logs') {
-        sendText(res, 200, logBundle({ lines: clampLogLines(url.searchParams.get('lines')) }), `dsh-remote-host-${fileStamp()}.log`)
-        return
-      }
-      if (method !== 'POST') throw new BridgeError('method/not-allowed', '方法不允许', 405)
-      checkCsrf(req)
-      if (path === '/api/setup/tailscale') {
-        if (tailscale === null) throw new BridgeError('tailscale/unavailable', '内置 Tailscale 节点不可用', 503)
-        const body = await readJson(req)
-        const action = typeof body.action === 'string' ? body.action : ''
-        if (action === 'enable') await tailscale.setEnabled(true)
-        else if (action === 'disable') await tailscale.setEnabled(false)
-        else if (action === 'authkey') await tailscale.setAuthKey(typeof body.value === 'string' ? body.value : '')
-        else if (action === 'hostname') await tailscale.setHostname(typeof body.value === 'string' ? body.value : '')
-        else if (action === 'statedir') await tailscale.setStateDir(typeof body.value === 'string' ? body.value : '')
-        else if (action === 'restart') await tailscale.restart()
-        else throw new BridgeError('setup/bad-request', '未知的 Tailscale 操作', 400)
-        try {
-          onDiscoveryChange?.()
-        } catch (error) {
-          logger?.warn?.(`[mobile-bridge] discovery notify failed: ${String(error)}`)
-        }
-        sendJson(res, 200, { ok: true, tailscale: tailscale.status() })
-        return
-      }
-      if (path === '/api/setup/update') {
-        if (updater === null) throw new BridgeError('update/unavailable', '当前版本不支持检查更新', 503)
-        const body = await readJson(req)
-        const update = await updater.check({ force: body.force === true })
-        sendJson(res, 200, { ok: true, update })
-        return
-      }
-      if (path === '/api/setup/code') {
-        const pairing = auth.rotateCode()
-        sendJson(res, 200, { code: pairing.code, expiresAt: new Date(pairing.expiresAt).toISOString() })
-        return
-      }
-      if (path === '/api/setup/revoke') {
-        const body = await readJson(req)
-        if (typeof body.deviceId !== 'string') throw new BridgeError('setup/bad-request', '缺少 deviceId', 400)
-        const revoked = auth.revoke(body.deviceId)
-        if (!revoked) throw new BridgeError('setup/not-found', '设备不存在', 404)
-        broadcast.closeDevice(body.deviceId)
-        approvals.revalidate()
-        sendJson(res, 200, { ok: true })
-        return
-      }
-      if (path === '/api/setup/settings') {
-        const body = await readJson(req)
-        const next = auth.updateSettings(body)
-        try {
-          onDiscoveryChange?.()
-        } catch (error) {
-          logger?.warn?.(`[mobile-bridge] discovery toggle failed: ${String(error)}`)
-        }
-        sendJson(res, 200, { settings: next })
-        return
-      }
-      if (path === '/api/setup/group') {
-        if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
-        const body = await readJson(req)
-        const action = typeof body.action === 'string' ? body.action : ''
-        if (action === 'create') {
-          sendJson(res, 200, group.create({ name: body.name }))
-          return
-        }
-        if (action === 'invite') {
-          sendJson(res, 200, { invite: group.rotateInvite(), ...group.snapshot() })
-          return
-        }
-        if (action === 'join') {
-          const selfBaseUrl = advertisedBaseUrl(body.baseUrl, body.selfBaseUrl)
-          sendJson(res, 200, await group.joinRemote({ baseUrl: body.baseUrl, code: body.code, selfBaseUrl, collabRoot: collabRoot(), collabWorkspaceId: collabWorkspace()?.id ?? null }))
-          return
-        }
-        if (action === 'leave') {
-          sendJson(res, 200, group.leave())
-          return
-        }
-        if (action === 'forget') {
-          const removed = group.removePeer(typeof body.deviceId === 'string' ? body.deviceId : '')
-          sendJson(res, 200, { removed, ...group.snapshot() })
-          return
-        }
-        if (action === 'refresh') {
-          await group.refresh()
-          sendJson(res, 200, group.snapshot())
-          return
-        }
-        throw new BridgeError('setup/bad-request', '未知的绑定组操作', 400)
-      }
-      if (path === '/api/setup/reset') {
-        auth.revokeAll()
-        auth.rotateCode()
-        broadcast.closeAll()
-        approvals.revalidate()
-        sendJson(res, 200, { ok: true })
-        return
-      }
-      throw new BridgeError('not-found', '未知的设置接口', 404)
-    }
+    if (await setupRoutes({ req, res, url, method, path })) return
 
     if (method === 'POST' && path === '/api/pair') {
       const body = await readJson(req)
