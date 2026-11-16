@@ -293,18 +293,24 @@ async function main() {
       const workspaces = await call('/api/workspaces', { auth: true })
       const workspace = (workspaces.body.workspaces ?? [])[0]
       assert(workspace !== undefined, '没有工作区')
-      const created = await call('/api/sessions', {
-        method: 'POST',
-        auth: true,
-        body: {
-          workspaceId: workspace.id,
-          // 故意要求跑一条无害命令，触发工具审批
-          prompt: '请用 shell 工具执行 echo bridge-approval-test，然后原样回复它的输出。',
-          permission: 'workspace-write'
-        }
-      })
+      const created = await call('/api/sessions', { method: 'POST', auth: true, body: { workspaceId: workspace.id } })
       assert(created.status === 200, `建会话失败：${created.status} ${JSON.stringify(created.body)}`)
       const id = created.body.sessionId
+
+      // 先降到 read-only：会「问审批」的宿主这时才会弹卡（body 是 {preset}，不是 {value}）
+      const preset = await call(`/api/sessions/${encodeURIComponent(id)}/permission`, {
+        method: 'POST',
+        auth: true,
+        body: { preset: 'read-only' }
+      })
+      assert(preset.status === 200, `设置权限预设失败：${preset.status} ${JSON.stringify(preset.body)}`)
+
+      const prompted = await call(`/api/sessions/${encodeURIComponent(id)}/prompt`, {
+        method: 'POST',
+        auth: true,
+        body: { text: '请用 shell 工具执行 echo bridge-approval-test，然后原样回复它的输出。' }
+      })
+      assert(prompted.status === 200, `派 prompt 失败：${prompted.status}`)
 
       let approval = null
       let finished = false
@@ -326,7 +332,7 @@ async function main() {
         await call(`/api/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', auth: true, body: {} })
         return {
           skip: finished
-            ? '这一轮正常跑完但没有触发审批（当前权限不需要审批，或模型没调工具）'
+            ? '这一轮正常跑完但没有触发审批：宿主的审批策略大概是 never（本机就是），read-only 下也直接执行'
             : '90 秒内既没有审批卡、轮次也没结束（宿主很忙？）'
         }
       }

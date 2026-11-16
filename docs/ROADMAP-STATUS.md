@@ -75,6 +75,7 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 
 | 项 | 为什么只能真机 |
 |---|---|
+| ~~A5 审批点按~~ | 脚本已能建会话 → 设 `read-only` 预设（body 是 `{preset}`）→ 派 shell 请求 → 轮询审批卡；但**本机宿主审批策略是 never**，`read-only` 下也直接执行，拿不到卡片。要验得换一台会问审批的宿主 |
 | ~~A7 plan-review~~ | **已自动化**：`--approvals` 下走「建会话 → `POST plan {active:true}` → prompt」能稳定拿到卡并代答；仍建议真机点一次确认 UI 呈现 |
 | A9 历史图片回显与全屏 | 要在手机上点开图片 |
 | A10 断线重连 | 需要设备侧断网/恢复 |
@@ -95,9 +96,12 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 改对之后一次就拿到 `planReview:true` 的卡（计划正文 2945 字），并成功用 `POST /api/questions/:id` 代答。
 已把这条写进 `API.md`（会话动作的 body 契约）与 `tools/acceptance.mjs`（A7，`--approvals` 下跑）。
 
+顺带又抓到第二处契约错误：`POST /api/sessions/:id/permission` 要的是 `{preset:string}`，我在上一轮 API.md 里写成了 `{value}`；
+实测传 `{value}` 会得到 400 `permission/bad-request`「缺少 preset」。两处都已在 `API.md` 里改正，A5 也改成先设预设再派 prompt。
+
 ## 还没做完的三件事
 
-1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层（`--approvals` 还能试跑审批链路），剩下的 A7/A9–A12/A15/A18/A19 需要一台真机
+1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层（A7 计划审阅已自动化通过，A5 审批链路受宿主审批策略限制），剩下的 A9–A12/A15/A18/A19 需要一台真机
    （审批点按、图片全屏、断网/切网、锁屏通知、NAT 发现、彻底删除）。
 2. **R26 发布私钥**：跑一次 `tools/make-keystore.ps1` 即可（密钥与口令由它生成并写进已 gitignore 的位置）；我这边的执行环境禁止创建 `.jks`，所以只能把链路和门禁做到「一条命令可用」。
 3. ~~R22 剩余~~：已完成（九个区块组件化）。

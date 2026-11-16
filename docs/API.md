@@ -63,7 +63,7 @@
 | POST | `/api/sessions/:id/prompt` | `{text, images?}` · `session/prompt-failed` |
 | POST | `/api/sessions/:id/cancel` | 空 body |
 | POST | `/api/sessions/:id/rename` | `{title}` |
-| POST | `/api/sessions/:id/permission` | `{value}`（取值见 `/api/permission-presets`） |
+| POST | `/api/sessions/:id/permission` | **`{preset:string}`**（取值见 `/api/permission-presets`：`read-only` / `workspace-write` / `danger-full-access` / `auto`）→ `{current}`；写 `{value}` 会得到 `permission/bad-request` 400「缺少 preset」 |
 | POST | `/api/sessions/:id/plan` | **`{active:boolean}`**（不是 `{plan:true}`；用错字段返回 `plan/bad-request` 400「active 必须是布尔值」）→ `{active,status}` |
 | POST | `/api/subscribe` \| `/api/unsubscribe` | `{sessionId}` 订阅流 |
 | GET | `/api/pending` | `{approvals:[...], questions:[...]}` |
