@@ -41,8 +41,12 @@
 | GET | `/api/setup/state` | 面板状态：`code`/`devices`/`settings`/`compatibility`/`logs`/`workspaces` 等 |
 | GET / POST | `/api/setup/tailscale` | 内嵌节点状态 / 启停与 auth key |
 | GET | `/api/setup/logs` | 导出的 `.log`（`?lines=`） |
-| POST | `/api/setup/{code,revoke,settings,group,reset}` | 刷新配对码 / 撤销设备 / 改设置 / 组操作 / 重置 |
-| POST | `/api/setup/update` | 立即重新检查更新 |
+| POST | `/api/setup/code` | 空 body → 轮换配对码 |
+| POST | `/api/setup/revoke` | `{deviceId}` 撤销单台设备 |
+| POST | `/api/setup/settings` | 设置项：`phoneFirst` / `discovery` / `approvalTimeoutMs` / `questionTimeoutMs` / `planReviewTimeoutMs` / `collabRoot` / `collabWorkspaceId` / `workspaceRoot` |
+| POST | `/api/setup/group` | `{action, baseUrl?, selfBaseUrl?, code?, deviceId?}`；`action` ∈ `create` / `invite` / `join` / `leave` / `forget`；`join` 的 `selfBaseUrl` 同 `/api/group/link` |
+| POST | `/api/setup/reset` | 重置：撤销全部设备并轮换配对码 |
+| POST | `/api/setup/update` | `{force?:boolean}`（`true` 时忽略缓存/节流立即重查）→ `{ok, update}` |
 
 ### 3.3 内容（设备 token 或组密钥）
 
@@ -71,7 +75,8 @@
 | POST | `/api/questions/:id` | `{answers:[{id,selected:[],custom?}]}` |
 | GET | `/api/events` | SSE（Bearer 设备 token；peer 403） |
 | GET | `/api/group` | 组状态 + `collabRoot` |
-| POST | `/api/group/invite` \| `/api/group/link` | 邀请码 / 让另一台主机加入 |
+| POST | `/api/group/invite` | 空 body → 一次性邀请码 |
+| POST | `/api/group/link` | **`{peerBaseUrl, code, selfBaseUrl?}`**：本机主动去加入对方；`selfBaseUrl` 是本机希望对方回连的地址（不传则用探测到的局域网地址） |
 | GET | `/api/collab/files?cwd&since` | 协作工作区文件清单（≤200 项） |
 | GET | `/api/collab/file?cwd&path=` | 单文件（只读协作工作区内） |
 

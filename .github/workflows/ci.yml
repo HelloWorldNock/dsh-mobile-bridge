@@ -20,12 +20,17 @@ jobs:
         with:
           node-version: '22'
 
-      # check.mjs 校验 18 个模块的导出面；node --test 跑 101 个用例（本机约 4 秒）。
+      # check.mjs 校验 27 个模块的导出面；node --test 跑 182 个用例。
       - name: module surface
         run: node scripts/check.mjs
 
       - name: unit tests
         run: node --test --test-reporter=spec
+
+      # 路由里读到的每个 body.<字段> 都必须写进 docs/API.md（G13）。
+      - name: api contract drift
+        working-directory: .
+        run: node tools/check-api-doc.mjs
 
       # 面板 bundle 由 client-src/ 片段生成；源码改了忘记重新生成会被这一步拦下。
       - name: client bundle freshness

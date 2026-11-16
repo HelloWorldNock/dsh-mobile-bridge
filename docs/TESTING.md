@@ -58,6 +58,7 @@ ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；纯 ASC
 | G10 | 网络切换 | LAN ↔ Tailscale ↔ 断网恢复 | 待跑 |
 | G11 | 后台运行 | 通知 / 后台恢复 / 进程回收 | 待跑 |
 | G12 | 发布信息 | 版本三处一致 + Note + contrib | ✅ |
+| G13 | 契约漂移 | `node tools/check-api-doc.mjs`：路由里读到的每个 `body.<字段>` 必须在 `docs/API.md` 里出现（同时是 `host/test/api-doc.test.js`） | ✅ 每条测试都跑 |
 
 ### 2.1 包一致性门禁做什么
 
@@ -85,6 +86,12 @@ L2；Keystore 加密与网络策略 L1 + 可构建；端到端主链路仍缺一
 ## 4. 发版动作清单
 
 **全部自动门禁一条命令**（推荐每天/每次改动后跑）：
+
+```powershell
+node tools/gates.mjs              # 含 G13 契约漂移检查
+```
+
+明细：
 
 ```powershell
 node tools/gates.mjs              # G01/G02/G03/G05/G12 自动跑；G06/G09/G10/G11 标「需人工」

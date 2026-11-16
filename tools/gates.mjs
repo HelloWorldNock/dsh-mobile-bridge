@@ -101,6 +101,17 @@ if (shouldRun('G04')) {
   }
 }
 
+// G13 契约漂移
+if (shouldRun('G13')) {
+  const r = runCommand(process.execPath, [join(REPO, 'tools/check-api-doc.mjs')])
+  record(
+    'G13',
+    'API 契约漂移',
+    r.status === 0 ? 'pass' : 'fail',
+    r.status === 0 ? summarize(r.stdout, /契约一致：\d+ 个 body 字段.*/) : '有 body 字段没写进 docs/API.md'
+  )
+}
+
 // G12 发布信息一致性（版本三处 + Note 存在 + contrib 指向当前版本）
 if (shouldRun('G12')) {
   try {
