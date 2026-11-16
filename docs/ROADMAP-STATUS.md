@@ -52,6 +52,48 @@
 bump → 打包 → 构建 → 哈希 → 四道门禁 → 提交/打 tag/推送 → GitHub Release；
 `--dry-run` 只看计划，`--from <step>` 断点续跑。v0.9.15 本身就是用它发的。
 
+## 需要仓库主人做的两件事（当前唯一阻塞）
+
+### 1. 生成发布私钥（R26 最后一步）
+
+我这边的执行环境禁止创建 `.jks`（安全策略命中 `secret.ext.jks`），所以只能把链路和门禁做到「一条命令可用」。
+在仓库根目录跑一次即可：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/make-keystore.ps1
+# 生成 .toolchain\keystore\release.jks + android\keystore.properties（两者都已 gitignore）
+cd android; .\gradlew.bat :app:assembleRelease --no-daemon
+powershell -NoProfile -File tools/verify-apk-signature.ps1 -Apk android\app\build\outputs\apk\release\app-arm64-v8a-release.apk -ExpectCommonName "CN=TS7 DSH Remote"
+```
+
+密钥与口令请离线备份：丢了就再也发不出「同签名」的升级包。
+
+### 2. 跑一轮真机矩阵（R09 的设备项）
+
+API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下这些必须真机点按，逐项记录在
+[`ACCEPTANCE-0.8.9.md`](ACCEPTANCE-0.8.9.md) 里即可：
+
+| 项 | 为什么只能真机 |
+|---|---|
+| A7 plan-review 批准后继续 | 需要模型进入计划模式；脚本里 `plan:true` 建会话没触发出 plan-review 卡（见下） |
+| A9 历史图片回显与全屏 | 要在手机上点开图片 |
+| A10 断线重连 | 需要设备侧断网/恢复 |
+| A11 / A12 LAN ↔ tailnet 切换 | 需要设备离网/回网 |
+| A15 电脑归档 → 手机就地取消 | 需要手机上正开着该会话 |
+| A18 NAT 虚拟机自动发现 | 需要宿主机 discovery-relay 与设备 |
+| A19 前台服务与后台通知 | 需要设备锁屏观察 |
+
+另外两件本机可验证、但依赖「重启 DSH 载入 0.9.x」的事：
+- `node tools/acceptance.mjs` 里的 **A8** 现在仍是失败（运行中的宿主是 0.8.8），重启宿主后应变绿；
+- 面板顶部的「宿主兼容性」横幅、`/api/setup/state.compatibility` 也只有在重启后才反映当前代码。
+
+### A7 的实测发现（本轮记录）
+
+用 `POST /api/sessions {plan:true, prompt}` 建会话时，只要给了 prompt 就会立刻派发，模型直接开始执行工具，
+**没有出现 plan-review 卡**（`/api/pending` 里没有 `planReview:true` 的问题）。
+要真的触发它，需要走「先建会话 → 用 `POST /api/sessions/:id/plan` 开计划模式 → 再 prompt」这条路径，
+或用 agent 的 `/plan` 命令。这条没有继续往下试，是因为它依赖模型行为，写进自动化容易变成“有时绿有时红”的假门禁。
+
 ## 还没做完的三件事
 
 1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层（`--approvals` 还能试跑审批链路），剩下的 A7/A9–A12/A15/A18/A19 需要一台真机
