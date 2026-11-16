@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -17,6 +19,29 @@ android {
         versionName = "0.9.1"
     }
 
+    /**
+     * Release 签名（R26）。密钥不进仓库：把 storeFile / storePassword / keyPassword / keyAlias
+     * 写进 android/keystore.properties（已 gitignore），构建时自动读取；文件不在就跳过签名，
+     * 仍产出未签名的 release 包（用来验证 ABI 拆分）。
+     */
+    val keystorePropsFile = rootProject.file("keystore.properties")
+    val keystoreProps = Properties()
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { stream -> keystoreProps.load(stream) }
+    }
+    val hasReleaseKey = keystoreProps.getProperty("storeFile") != null
+
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -25,6 +50,20 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseKey) signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    /**
+     * 按 ABI 拆包（R26）：单包里的大头是 gobridge.aar 的 native 库，
+     * 拆完每台设备只装自己那份；universalApk 保留一份给不确定架构的场合。
+     */
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
         }
     }
 

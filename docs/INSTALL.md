@@ -1,4 +1,4 @@
-# 安装、配对与升级（R25：从 README 拆出的单一事实源）
+﻿# 安装、配对与升级（R25：从 README 拆出的单一事实源）
 
 > README 只留一段概览 + 指向本文。命令与路径以这里为准。
 
@@ -66,6 +66,38 @@ cd <repo-root>\android
 - Kotlin 报 `AccessDeniedException` 且 `whoami /groups` 显示 `Low Mandatory Level` →
   `icacls "<toolchain>" /setintegritylevel '(OI)(CI)High'`。
 - 装到 MuMu：`adb install -r <apk>`，然后 `adb shell am start -n com.ts7.dshremote.debug/com.ts7.dshremote.MainActivity`。
+
+## 3.1 发布签名与 ABI 拆分（R26）
+
+`android/app/build.gradle.kts` 已经接好两条路，但**密钥永远不进仓库**：
+
+```properties
+# android/keystore.properties（已 gitignore，只放在本机）
+storeFile=/absolute/path/to/release.jks
+storePassword=…
+keyAlias=…
+keyPassword=…
+```
+
+- 文件存在 → `assembleRelease` 用 `signingConfigs.release` 签名；
+- 文件不存在 → 仍产出未签名 release 包（用来验证拆分体积），`apksigner verify` 会报
+  `Missing META-INF/MANIFEST.MF`，属于预期；
+- 自建密钥：`keytool -genkeypair -keystore release.jks -alias <alias> -keyalg RSA -keysize 2048 -validity 10000`，
+  密钥与口令自己保管（丢了就无法给老用户推送同一签名的升级）。
+
+ABI 拆分（`splits { abi { include("arm64-v8a", "x86_64"); isUniversalApk = true } }`）实测：
+
+| 产物 | 体积 | 内含 ABI |
+|---|---|---|
+| `app-arm64-v8a-*.apk` | 33–39 MB | arm64-v8a |
+| `app-x86_64-*.apk` | 35–41 MB | x86_64 |
+| `app-universal-*.apk` | 55–62 MB | arm64-v8a / armeabi-v7a / x86 / x86_64 |
+
+单包从 65 MB 降到 ~34 MB（release）/~39 MB（debug）。校验签名：
+
+```powershell
+& "<sdk>\build-tools\35.0.0\apksigner.bat" verify --print-certs <apk>
+```
 
 ## 4. 升级
 

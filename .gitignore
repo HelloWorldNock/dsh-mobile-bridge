@@ -1,4 +1,4 @@
-# 本地工具链（JDK / Android SDK / Gradle，约 2.7 GB）
+﻿# 本地工具链（JDK / Android SDK / Gradle，约 2.7 GB）
 .toolchain/
 
 # 构建与打包产物：APK 与插件 tgz 走 GitHub Release，不进仓库
@@ -14,6 +14,10 @@ android/build/
 android/app/build/
 android/app/.cxx/
 android/local.properties
+# 发布签名密钥的路径与口令（只在本机，绝不入库）
+android/keystore.properties
+*.jks
+*.keystore
 
 # 测试残留与依赖（只有仓库根部的临时 test/ 目录被忽略；
 # host/test 与 android/app/src/test 是正式测试，必须入库）

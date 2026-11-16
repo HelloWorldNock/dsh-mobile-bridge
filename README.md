@@ -257,7 +257,7 @@ $env:GRADLE_USER_HOME='<toolchain>\gradle-home'
 cd <repo-root>\android; .\gradlew.bat :app:assembleDebug --no-daemon
 ```
 
-工具链与 MuMu 安装细节见 **[docs/INSTALL.md](docs/INSTALL.md)**。
+产物按 ABI 拆成 arm64-v8a / x86_64 / universal 三个包（单包 ~34 MB，universal ~55 MB）；签名、拆分与工具链细节见 **[docs/INSTALL.md](docs/INSTALL.md)**。
 
 ## 测试
 
