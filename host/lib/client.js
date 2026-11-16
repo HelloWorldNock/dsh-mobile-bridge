@@ -1220,6 +1220,14 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * 测试面：bundle 是单文件、内部组件不导出，单测要渲染 PanelBody 只能从这里拿。
+     * 只在 Node 侧的假 window 里被读到，DSH 运行时没有任何代码访问它。
+     */
+    if (typeof window !== "undefined") {
+      window.__DMB_TEST__ = { PanelBody, SidebarAction, SettingsCard, SafeSidebarAction, SafeSettingsCard }
+    }
+
     return { apply, inject: ["slots"] }
   },
 })

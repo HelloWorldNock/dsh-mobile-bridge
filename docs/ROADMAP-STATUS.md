@@ -1,0 +1,64 @@
+# 整改路线状态总览（R01–R27）
+
+> 这份表是「路线走到哪」的唯一索引：每一项给出**证据位置**与**层级口径**
+> （L1 已实现 / L2 已单测 / L3 已集成 / L4 已真机 / L5 已交付，定义见 [`TESTING.md`](TESTING.md)）。
+> 最近更新：0.9.8。
+
+## 阶段一：交付收口（R01–R10）
+
+| 编号 | 事项 | 状态 | 证据 |
+|---|---|---|---|
+| R01 | 修 `.gitignore`，测试入库 | ✅ | `git ls-files host/test` = 12 个（0.8.9 时的口径），`node --test` 可复跑 |
+| R02 | 打包一致性门禁 | ✅ | `tools/verify-package.mjs`（递归比 `lib/**` SHA-256 + 三处版本号 + SHA256SUMS 对账） |
+| R03 | 重打包并逐项核对 | ✅ | 0.8.9 起每版都跑；抓到过 0.8.8 的 7 文件漂移 |
+| R04 | 统一超时 + 清理死提示 | ✅ | `state.js` 的 `TIMEOUT_DEFAULTS`（120/120/180），`index.js` 引用；启动日志改指侧栏面板 |
+| R05 | 手机端取消归档 | ✅ L1+L2 | `BridgeRepository.unarchiveActiveSession()` + 菜单切换 + 已归档提示条；Kotlin 侧可搜到该字符串 |
+| R06 | README + contrib | ✅ | 7 条路由、0.8.6–0.9.x 能力、删 `resync`、Windows 权限描述、五级口径；`contrib/` 跟到最新发布版 |
+| R07 | 三处升版 + Note | ✅ | 每版 `package.json` / `index.js` / `build.gradle.kts` 一致，`docs/RELEASE-*.md` 齐 |
+| R08 | 正式发布 | ✅ | v0.8.9 → v0.9.8 共 10 个 Release，资产含 tgz / 三包 APK / tsnode / SHA256SUMS |
+| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（11 项自动 + 10 项待真机），首份报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md) |
+| R10 | 最小 CI | ✅ | `.github/workflows/ci.yml`：`check.mjs` + `node --test` + 打包后过门禁 + `build-client --check` |
+
+## 阶段二：可靠性强化（R11–R18）
+
+| 编号 | 事项 | 状态 | 证据 |
+|---|---|---|---|
+| R11 | 启动兼容性探针 | ✅ | `lib/compatibility-check.js`（必需/可选分级、签名用 `Function.length`），面板横幅 + `/api/setup/state.compatibility` |
+| R12 | Android P0 数据层测试 | ✅ L2 | `app/src/test` 55 例（配对记录/选路/待办合并/重连节奏/明文白名单/迁移/时间线折叠） |
+| R13 | 真实 DSH 契约用例 | ✅ L3 | `host/test/integration/prompt.test.js`（真 prompt → 历史落盘 → 归档），默认跳过 |
+| R14 | Android Keystore | ✅ L1+L2 | `SecureStorage`（EncryptedSharedPreferences + 迁移），**真机落盘待 R09** |
+| R15 | 网络安全配置 | ✅ L1 | `NetworkPolicy` + `network_security_config.xml`（公网明文即拒） |
+| R16 | 鉴权审计 | ✅ | `/api/group/hello` 只认组密钥；29 条设备路由的 401 矩阵 |
+| R17 | 协作组角色权限设计 | ✅ 设计 | [`SECURITY.md`](SECURITY.md)：四角色、凭据映射、逐路由守卫表、落地顺序 |
+| R18 | 构建可复现 | ✅ | `android/gradlew*` + `gradle/wrapper`（8.9）；`tools/test-android.ps1` 绕开中文路径坑 |
+
+## 阶段三：结构优化（R19–R27）
+
+| 编号 | 事项 | 状态 | 证据 |
+|---|---|---|---|
+| R19 | 拆 `BridgeRepository.kt` | ✅ | 抽出 `KeyValueStore` / `PendingMerge` / `ReconnectPolicy` / `ConnectionRouter` / `SessionSyncManager`，仓库只剩副作用 |
+| R20 | 拆 `SessionScreen.kt` | ✅ | 1,084 → 585 行；`TimelineFormat`（纯逻辑）+ `SessionTimeline.kt` + `SessionDialogs.kt` |
+| R21 | 拆 `server.js` | ✅ | 1,438 → 738 行；`routes/{setup,workspaces,connections,sessions}.js` + `services/{prompt,format}.js` + `adapters/dsh/` |
+| R22 | 拆 `client.js` | ◐ 四刀 | `client-src/{styles,helpers,components}.mjs` + 生成器 `--check` + 渲染冒烟测试（`test/client-render.test.js`）；`PanelBody`（约 880 行）仍待切 |
+| R23 | `adapters/dsh/` 落地 | ✅ | 会话/工作区适配层，`server.js` 里 0 处直接摸宿主接口 |
+| R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、22 条路由、形状、12 类 SSE、60 个错误码 |
+| R25 | 文档单一事实源 | ✅ | [`API.md`](API.md) / [`INSTALL.md`](INSTALL.md) / [`TESTING.md`](TESTING.md) / [`SECURITY.md`](SECURITY.md) + README 文档地图 |
+| R26 | 签名 + ABI 拆分 | ◐ | 拆分已生效（单包 65 → 34 MB）；签名链路已接好，**私钥需自备**（环境禁止创建 `.jks`） |
+| R27 | always-allow / 模型切换 / fork / 子代理控制 | ⏸ | 路线本身标为低优先，等范围决策 |
+
+## 还没做完的三件事
+
+1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层，剩下的 A5/A7/A9–A12/A15/A18–A20 需要一台真机
+   （审批点按、图片全屏、断网/切网、锁屏通知、NAT 发现、彻底删除）。
+2. **R26 发布私钥**：`keytool -genkeypair` 需由仓库主人执行并保管（`.jks` 被运行环境的安全策略拦下）。
+3. **R22 剩余**：`PanelBody` 的区块切分（渲染冒烟测试已就位，可以安全推进）。
+
+## 当前质量基线（0.9.8）
+
+```
+host      : 27 模块 / 174 例（173 过 + 1 集成用例默认跳过）
+android   : 55 例
+门禁      : verify-package PASS（38 文件 / 26 个 lib/** 同哈希，版本三处一致）
+构建      : assembleDebug / assembleRelease 均成功（versionCode 29，ABI 三包）
+发布      : 最新 v0.9.8（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
+```

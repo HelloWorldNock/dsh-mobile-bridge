@@ -1,0 +1,168 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+/**
+ * 面板渲染冒烟测试（R22 第四刀）。
+ *
+ * 面板是单文件 bundle、内部组件不导出，所以 bundle 末尾留了一个 `window.__DMB_TEST__`
+ * 测试面（运行时无人访问）。这里用「假 React + 假 window」把 PanelBody 真跑一遍：
+ * 不比对像素，只保证「渲染不抛、关键区块存在」——拆分/搬迁最容易破坏的正是这个。
+ */
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const BUNDLE = join(HERE, '..', 'lib', 'client.js')
+
+/** 一个能跑一轮渲染的假 React：hooks 用一份按索引滚动的状态表模拟。 */
+function makeReact() {
+  let states = []
+  let cursor = 0
+  const effects = []
+
+  class Component {
+    constructor(props) {
+      this.props = props ?? {}
+      this.state = {}
+    }
+    setState() {}
+  }
+
+  const React = {
+    Component,
+    Fragment: 'fragment',
+    createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
+    useState: (initial) => {
+      const index = cursor++
+      if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial
+      return [states[index], (next) => {
+        states[index] = typeof next === 'function' ? next(states[index]) : next
+      }]
+    },
+    useRef: (initial) => {
+      const index = cursor++
+      if (!(index in states)) states[index] = { current: initial ?? null }
+      return states[index]
+    },
+    useEffect: (fn) => {
+      effects.push(fn)
+    },
+    useLayoutEffect: (fn) => {
+      effects.push(fn)
+    },
+    useCallback: (fn) => fn,
+    useMemo: (fn) => fn(),
+    createContext: (value) => ({ Provider: value, Consumer: value, _currentValue: value }),
+    isValidElement: (value) => value !== null && typeof value === 'object' && 'type' in value,
+    Children: { map: (children, fn) => (Array.isArray(children) ? children.map(fn) : []) }
+  }
+  React.default = React
+
+  return {
+    React,
+    reset() {
+      states = []
+      cursor = 0
+      effects.length = 0
+    },
+    /** 调一次组件函数（等价于 React 渲染一层），hooks 索引从 0 开始。 */
+    render(component, props) {
+      cursor = 0
+      return component(props ?? {})
+    }
+  }
+}
+
+function loadBundle() {
+  const code = readFileSync(BUNDLE, 'utf8')
+  const react = makeReact()
+  const registered = []
+  const fakeWindow = {
+    __ModuleLoader__: {
+      load: (mod) => registered.push(mod)
+    },
+    addEventListener() {},
+    removeEventListener() {},
+    location: { origin: 'http://127.0.0.1:48123' }
+  }
+  const fakeDocument = {
+    getElementById: () => null,
+    createElement: () => ({ id: '', textContent: '' }),
+    head: { appendChild() {} },
+    body: {}
+  }
+  const fakeRequire = (name) => {
+    if (name === 'react') return react.React
+    if (name === 'react-dom') return { createPortal: (node) => node }
+    throw new Error(`unexpected require: ${name}`)
+  }
+  const run = new Function('window', 'document', 'fetch', 'require', code)
+  run(fakeWindow, fakeDocument, () => Promise.reject(new Error('offline')), fakeRequire)
+  const module = registered[0]
+  // __DMB_TEST__ 是在 factory 里挂的，光 load 不够，要真调一次 factory
+  const exports = module.factory(fakeRequire)
+  return { module, exports, react, fakeWindow }
+}
+
+/** 把返回的元素树摊平成文本片段，方便断言「某个区块渲染出来了」。 */
+function flatten(node, out = []) {
+  if (node === null || node === undefined || node === false) return out
+  if (typeof node === 'string' || typeof node === 'number') {
+    out.push(String(node))
+    return out
+  }
+  if (Array.isArray(node)) {
+    for (const child of node) flatten(child, out)
+    return out
+  }
+  if (typeof node === 'object') {
+    for (const child of node.children ?? []) flatten(child, out)
+  }
+  return out
+}
+
+test('the bundle exposes its test surface only when a window exists', () => {
+  const { fakeWindow, module } = loadBundle()
+  assert.equal(module.id, 'dsh-mobile-bridge')
+  assert.equal(typeof fakeWindow.__DMB_TEST__, 'object')
+  for (const name of ['PanelBody', 'SidebarAction', 'SettingsCard']) {
+    assert.equal(typeof fakeWindow.__DMB_TEST__[name], 'function', `${name} 没暴露出来`)
+  }
+})
+
+test('PanelBody renders the offline state without throwing', () => {
+  const { fakeWindow, react } = loadBundle()
+  const { PanelBody } = fakeWindow.__DMB_TEST__
+  react.reset()
+
+  const tree = react.render(PanelBody, { embedded: false, onClose: () => {} })
+  assert.ok(tree !== null && typeof tree === 'object', 'PanelBody 应当返回元素树')
+  const text = flatten(tree).join(' ')
+  // 骨架：标题 + 关闭 + 桥接状态；离线时给出「桥接未运行」而不是白屏
+  assert.match(text, /手机远控/, `期望标题在树里，实际：${text.slice(0, 200)}`)
+  assert.match(text, /桥接|离线|没有响应/, `期望桥接状态文案，实际：${text.slice(0, 200)}`)
+})
+
+test('SidebarAction renders the footer button', () => {
+  const { fakeWindow, react } = loadBundle()
+  const { SidebarAction } = fakeWindow.__DMB_TEST__
+  react.reset()
+
+  const tree = react.render(SidebarAction, {})
+  const text = flatten(tree).join(' ')
+  assert.match(text, /手机远控/)
+})
+
+test('SettingsCard respects the settings.plugins.tab filter', () => {
+  const { fakeWindow, react } = loadBundle()
+  const { SafeSettingsCard } = fakeWindow.__DMB_TEST__
+  react.reset()
+
+  // 别的插件的 tab：必须渲染成 null，不能抢别人的位置
+  assert.equal(react.render(SafeSettingsCard, { only: 'other-plugin' }), null)
+  // 自己的 tab：返回元素树
+  react.reset()
+  const tree = react.render(SafeSettingsCard, { only: 'dsh-mobile-bridge' })
+  assert.ok(tree !== null && typeof tree === 'object')
+})
