@@ -262,12 +262,20 @@ Android App  ──HTTP/JSON + SSE──▶  http://<PC-IP>:48123  ──▶  DS
 
 ## 构建 Android
 
+仓库已提交 Gradle Wrapper（`android/gradlew`、`gradlew.bat`、`gradle/wrapper/`），固定 8.9，新机器不用装 Gradle：
+
 ```powershell
 $env:JAVA_HOME='<toolchain>\jdk-17'
 $env:ANDROID_HOME='<toolchain>\android-sdk'
-$env:GRADLE_USER_HOME='<toolchain>\gradle-home'
-& '<toolchain>\gradle-8.9\bin\gradle.bat' `
-  -p '<repo-root>\android' :app:assembleDebug --no-daemon
+$env:GRADLE_USER_HOME='<toolchain>\gradle-home'   # 首次会下载 gradle-8.9-bin.zip
+cd <repo-root>\android
+.\gradlew.bat :app:assembleDebug --no-daemon
+```
+
+用本机现成的 gradle-8.9 也一样（等价）：
+
+```powershell
+& '<toolchain>\gradle-8.9\bin\gradle.bat' -p '<repo-root>\android' :app:assembleDebug --no-daemon
 ```
 
 产物：`android/app/build/outputs/apk/debug/app-debug.apk`。debug 包名是 `com.ts7.dshremote.debug`。
@@ -290,14 +298,22 @@ adb shell am start `
 ## 测试
 
 ```powershell
+# Host 侧
 cd host
 npm run check
-npm test
+node --test
+
+# Android 数据层（JVM 单测，31 例）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-android.ps1
 ```
 
 当前 113 个 host 测试（13 个文件）全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话（`sessionId` 续跑、cwd 归位工作区、派发失败清理空会话）、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、归档会话过滤与工作区分组剔除、归档/取消归档接口与运行中拒绝、归档集合变化到 `session.removed`/`session.added` 的换算、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界（含派活不能越出协作工作区）、协作工作区配置（相对路径拒绝）、协作工作区下的文件列举与越界拒绝、组内委派（workspaceId 优先、cwd 回退、续跑、并发权限、缺失时报错）、宿主兼容性探针（齐全/缺必需接口/签名漂移/同步 resolveByPath 降级/空 ctx）、全部设备路由的缺 token 与伪造 token 401、`/api/group/hello` 只认组密钥不收设备 token、无绑定组时 503。
 
 MuMu 端到端已验证（0.8.7 一轮）：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI、Q 版图标、过滤后的任务列表和 DSH 侧栏控制面板都实际跑过。**0.8.9 这一轮的归档/取消归档、`/api/logs`、0.2.x 适配尚未在同一台真机上重跑**，见下一节的层级口径。
+
+Android 侧 31 个 JVM 单测（`android/app/src/test`）覆盖：配对记录读写 / 0.1.x 单主机迁移 / `activeId`、`hostId` 与端口规则、地址分类与局域网优先 / 合并去重 / 显式钉住传输、待办队列合并的三种时序（服务端权威 / 本地新卡片存活 / 同 id 不重复）、建连与事件流两套退避曲线、明文白名单（私网放行、公网拒绝、https 放行、IPv6 回环与链路本地）。
+
+> 仓库路径含中文时 Gradle 的 test worker 会起不来（`ClassNotFoundException: worker.org.gradle.process.internal.worker.GradleWorkerMain`——worker 的 classpath 通过 `@<argfile>` 传给子 JVM）。`tools/test-android.ps1` 会先建 ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；在纯 ASCII 路径下直接 `.\gradlew.bat :app:testDebugUnitTest` 也可以。
 
 DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧栏出现「手机远控」按钮，点击后弹出面板，能读取桥接状态、设备、配对码和设备列表；修复 `BRIDGE_PORT` 未定义后，按钮在面板关闭后仍保持存在，错误边界与 `dsh-app://app` CORS 生效。
 

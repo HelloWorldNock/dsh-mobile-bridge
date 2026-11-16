@@ -598,16 +598,15 @@ class BridgeRepository(
      * 才保留 —— 那是在路上撞车的 SSE 帧，不是陈旧数据。
      */
     private fun applyPending(runtime: Runtime, incoming: PendingState, requestedAt: Long) {
-        fun fresh(id: String): Boolean = (runtime.pendingAddedAt[id] ?: 0L) >= requestedAt
-        val next = PendingState(
-            approvals = (incoming.approvals + runtime.pending.approvals.filter { fresh(it.id) }).distinctBy { it.id },
-            questions = (incoming.questions + runtime.pending.questions.filter { fresh(it.id) }).distinctBy { it.id }
+        val next = PendingMerge.merge(
+            incoming = incoming,
+            current = runtime.pending,
+            isFresh = PendingMerge.freshness(runtime.pendingAddedAt, requestedAt)
         )
         if (next == runtime.pending) return
         logPendingDiff(runtime, runtime.pending, next)
         runtime.pending = next
-        val alive = (next.approvals.map { it.id } + next.questions.map { it.id }).toSet()
-        runtime.pendingAddedAt.keys.retainAll(alive)
+        runtime.pendingAddedAt.keys.retainAll(PendingMerge.aliveIds(next))
         sync()
     }
 
@@ -941,7 +940,7 @@ class BridgeRepository(
                 sync()
                 if (failure is ApiException && failure.status == 401) break
                 attempt += 1
-                delay(minOf(15_000L, 2_000L * attempt))
+                delay(ReconnectPolicy.connectBackoffMs(attempt))
             }
             if (runtimes[runtime.profile.id] === runtime && runtime.connection == ConnectionState.Connected) {
                 startEvents(runtime)
@@ -1057,8 +1056,8 @@ class BridgeRepository(
                 // screen-off power saving). Retry the same endpoint twice before
                 // paying for a full LAN/Tailscale route probe, so a single blip
                 // does not flash the UI to "连接中" or fire connection alerts.
-                if (runtime.eventFailures <= 2) {
-                    delay(1_000)
+                if (ReconnectPolicy.retriesInPlace(runtime.eventFailures)) {
+                    delay(ReconnectPolicy.streamRetryDelayMs(runtime.eventFailures))
                     continue
                 }
                 // The route may have changed (Wi-Fi -> cellular). Do not retry the
@@ -1067,7 +1066,7 @@ class BridgeRepository(
                 runtime.error = failure?.message?.takeIf { it.isNotBlank() }
                 runtime.client = null
                 sync()
-                val wait = minOf(30_000L, 2_000L * (1 shl minOf(runtime.eventFailures - 3, 4)))
+                val wait = ReconnectPolicy.streamRetryDelayMs(runtime.eventFailures)
                 scope.launch {
                     delay(wait)
                     if (runtimes[runtime.profile.id] === runtime) restart(runtime)

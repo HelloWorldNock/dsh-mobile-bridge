@@ -7,15 +7,15 @@ import android.content.Context
  * 需要排查时可以在任务页右上角临时打开。
  */
 object SessionPrefs {
-    private const val KEY_SHOW_DETAILS = "timeline.showDetails"
+    internal const val KEY_SHOW_DETAILS = "timeline.showDetails"
 
-    fun showDetails(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_SHOW_DETAILS, false)
+    fun showDetails(context: Context): Boolean = showDetails(KeyValueStore.of(context))
 
-    fun setShowDetails(context: Context, value: Boolean) {
-        prefs(context).edit().putBoolean(KEY_SHOW_DETAILS, value).apply()
+    fun showDetails(store: KeyValueStore): Boolean = store.getBoolean(KEY_SHOW_DETAILS, false)
+
+    fun setShowDetails(context: Context, value: Boolean) = setShowDetails(KeyValueStore.of(context), value)
+
+    fun setShowDetails(store: KeyValueStore, value: Boolean) {
+        store.putBoolean(KEY_SHOW_DETAILS, value)
     }
-
-    private fun prefs(context: Context) =
-        context.applicationContext.getSharedPreferences(HostStore.PREFS, Context.MODE_PRIVATE)
 }

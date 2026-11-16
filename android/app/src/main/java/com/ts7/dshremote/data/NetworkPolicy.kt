@@ -33,7 +33,13 @@ object NetworkPolicy {
      * @return null 表示允许；否则返回一句可以直接显示给用户的原因。
      */
     fun check(rawUrl: String): String? {
-        val url = normalizeBaseUrl(rawUrl)
+        val trimmed = rawUrl.trim()
+        if (trimmed.isBlank()) return "地址为空，先填电脑 IP 和端口"
+        // 先看用户写的协议：`ftp://host` 会被 normalizeBaseUrl 当成 `http://ftp://host`，
+        // 主机名变成 "ftp" 反而被单标签规则放过，所以这里必须显式拒掉。
+        val declared = Regex("^([a-zA-Z][a-zA-Z0-9+.-]*)://").find(trimmed)?.groupValues?.get(1)?.lowercase()
+        if (declared != null && declared != "http" && declared != "https") return "只支持 http/https：$rawUrl"
+        val url = normalizeBaseUrl(trimmed)
         if (url.isBlank()) return "地址为空，先填电脑 IP 和端口"
         val uri = runCatching { URI(url) }.getOrNull() ?: return "地址格式不对：$rawUrl"
         val scheme = uri.scheme?.lowercase() ?: "http"

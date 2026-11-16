@@ -69,4 +69,7 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // JVM 单测：数据层的纯逻辑（配对记录、选路、待办合并、重连节奏、明文白名单）。
+    testImplementation("junit:junit:4.13.2")
 }
