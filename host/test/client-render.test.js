@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { DevicesCard } from '../client-src/components.mjs'
+import { DevicesCard, LogCard } from '../client-src/components.mjs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -212,5 +212,57 @@ test('DevicesCard renders the empty state and the list with revoke callback', ()
   } finally {
     delete globalThis.h
     delete globalThis.fmtTime
+  }
+})
+
+
+test('LogCard collapses, expands and wires its callbacks', () => {
+  globalThis.h = (type, props, ...children) => ({ type, props: props ?? {}, children })
+  try {
+    const calls = []
+    const base = {
+      logsPath: '/tmp/bridge.log',
+      onToggle: () => calls.push('toggle'),
+      onCopy: () => calls.push('copy'),
+      onRefresh: () => calls.push('refresh'),
+      baseUrl: 'http://127.0.0.1:48123'
+    }
+
+    // 收起态：没有日志正文，导出链接指向 loopback 接口
+    const collapsed = LogCard({ ...base, open: false, busy: false, text: '' })
+    const collapsedText = flatten(collapsed).join(' ')
+    assert.match(collapsedText, /运行日志/)
+    assert.match(collapsedText, /bridge\.log/)
+    assert.match(collapsedText, /<a|导出日志文件/)
+
+    const find = (node, predicate, out = []) => {
+      if (node === null || typeof node !== 'object') {
+        if (predicate(node)) out.push(node)
+        return out
+      }
+      if (predicate(node)) out.push(node)
+      for (const child of node.children ?? []) find(child, predicate, out)
+      return out
+    }
+    const link = find(collapsed, (n) => n && n.type === 'a')[0]
+    assert.equal(link.props.href, 'http://127.0.0.1:48123/api/setup/logs?lines=800')
+    assert.equal(link.props.download, 'dsh-remote-host.log')
+
+    // 展开态：显示正文与「复制全部 / 刷新」
+    const expanded = LogCard({ ...base, open: true, busy: false, text: 'line-1\nline-2' })
+    const expandedText = flatten(expanded).join(' ')
+    assert.match(expandedText, /line-1/)
+    assert.match(expandedText, /复制全部/)
+    const buttons = find(expanded, (n) => n && n.type === 'button')
+    assert.equal(buttons.length, 3) // 收起/查看 + 复制全部 + 刷新
+    buttons[1].props.onClick()
+    buttons[2].props.onClick()
+    assert.deepEqual(calls, ['copy', 'refresh'])
+
+    // 读取中且没有正文
+    const loading = flatten(LogCard({ ...base, open: true, busy: true, text: '' })).join(' ')
+    assert.match(loading, /读取中/)
+  } finally {
+    delete globalThis.h
   }
 })

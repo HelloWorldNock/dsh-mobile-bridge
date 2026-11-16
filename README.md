@@ -80,7 +80,7 @@ docs/                 契约与流程：API / SECURITY / RELEASE-* / STAGE*/CLOS
 | 接口字段、错误码、SSE 事件 | [`docs/API.md`](docs/API.md) |
 | 凭据/角色/授权边界 | [`docs/SECURITY.md`](docs/SECURITY.md) |
 | 路线整体进度（R01–R27 逐项状态） | [`docs/ROADMAP-STATUS.md`](docs/ROADMAP-STATUS.md) |
-| 每轮改了什么、验证到哪一级 | [`docs/STAGE2-2026-11-17.md`](docs/STAGE2-2026-11-17.md)、[`docs/CLOSEOUT-0.8.9.md`](docs/CLOSEOUT-0.8.9.md)、[`docs/RELEASE-0.9.9.md`](docs/RELEASE-0.9.9.md) |
+| 每轮改了什么、验证到哪一级 | [`docs/STAGE2-2026-11-17.md`](docs/STAGE2-2026-11-17.md)、[`docs/CLOSEOUT-0.8.9.md`](docs/CLOSEOUT-0.8.9.md)、[`docs/RELEASE-0.9.10.md`](docs/RELEASE-0.9.10.md) |
 | 装、配对、升级、排障 | [docs/INSTALL.md](docs/INSTALL.md) |
 | 门禁、测试分层、发版动作 | [docs/TESTING.md](docs/TESTING.md) |
 | 真机怎么验 | [docs/ACCEPTANCE-0.8.9.md](docs/ACCEPTANCE-0.8.9.md) |
@@ -103,7 +103,7 @@ dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-<v>.t
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.9.9.tgz（约 9.0 MB / 38 个文件，含 lib/adapters、lib/routes、lib/services 与 bin/tsnode-windows-amd64.exe）
+# → dist/dsh-mobile-bridge-0.9.10.tgz（约 9.0 MB / 38 个文件，含 lib/adapters、lib/routes、lib/services 与 bin/tsnode-windows-amd64.exe）
 
 # 发布门禁：解包逐文件比对 SHA-256，并检查三处版本号一致（不一致退出码 1）
 node tools/verify-package.mjs
@@ -114,12 +114,12 @@ node tools/verify-package.mjs
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.9.9.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.9.10.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
 
-分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.9.9.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
+分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.9.10.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
 
 ## 手机连接
 
@@ -263,7 +263,7 @@ cd <repo-root>\android; .\gradlew.bat :app:assembleDebug --no-daemon
 ## 测试
 
 ```powershell
-cd host; node scripts/check.mjs; node --test          # 175 例（含 1 条默认跳过的真实宿主用例）
+cd host; node scripts/check.mjs; node --test          # 176 例（含 1 条默认跳过的真实宿主用例）
 powershell -File tools/test-android.ps1               # Android 数据层 34 例
 node tools/verify-package.mjs                         # 包一致性门禁
 ```
@@ -347,10 +347,10 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.9.9-arm64-v8a-debug.apk`（arm64 手机，39.2 MB）
-- `dist/TS7-DSH-Remote-0.9.9-x86_64-debug.apk`（模拟器/少数平板，40.6 MB）
-- `dist/TS7-DSH-Remote-0.9.9-debug.apk`（universal，61.5 MB）
-- `dist/dsh-mobile-bridge-0.9.9.tgz`
+- `dist/TS7-DSH-Remote-0.9.10-arm64-v8a-debug.apk`（arm64 手机，39.2 MB）
+- `dist/TS7-DSH-Remote-0.9.10-x86_64-debug.apk`（模拟器/少数平板，40.6 MB）
+- `dist/TS7-DSH-Remote-0.9.10-debug.apk`（universal，61.5 MB）
+- `dist/dsh-mobile-bridge-0.9.10.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `README.md`

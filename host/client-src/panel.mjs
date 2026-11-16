@@ -808,42 +808,16 @@ window.__ModuleLoader__.load({
               )
             : null,
           snap
-            ? h(
-                "div",
-                { className: "dmb-card" },
-                h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "运行日志"),
-                h(
-                  "div",
-                  { className: "dmb-setting" },
-                  h(
-                    "div",
-                    { className: "grow" },
-                    h("div", { className: "name" }, "bridge.log"),
-                    h(
-                      "div",
-                      { className: "hint" },
-                      snap.logs?.path
-                        ? `手机连不上、审批不同步之类的怪问题，导出这个文件发出去就行：${snap.logs.path}`
-                        : "这次运行没有落盘（只保留在内存里），重启后清空。",
-                    ),
-                  ),
-                  h("button", { className: "dmb-btn", onClick: toggleLogs }, logOpen ? "收起日志" : "查看最近日志"),
-                  h(
-                    "a",
-                    { className: "dmb-btn primary", href: `${BASE}/api/setup/logs?lines=800`, download: "dsh-remote-host.log" },
-                    "导出日志文件",
-                  ),
-                ),
-                logOpen ? h("div", { className: "dmb-log" }, logBusy && !logText ? "读取中…" : logText || "（还没有日志）") : null,
-                logOpen
-                  ? h(
-                      "div",
-                      { className: "dmb-actions", style: { marginTop: 10 } },
-                      h("button", { className: "dmb-btn", onClick: copyLogs }, "复制全部"),
-                      h("button", { className: "dmb-btn", onClick: loadLogs, disabled: logBusy }, logBusy ? "读取中…" : "刷新"),
-                    )
-                  : null,
-              )
+            ? h(LogCard, {
+                logsPath: snap.logs?.path,
+                open: logOpen,
+                busy: logBusy,
+                text: logText,
+                onToggle: toggleLogs,
+                onCopy: copyLogs,
+                onRefresh: loadLogs,
+                baseUrl: BASE,
+              })
             : null,
           snap
             ? h(

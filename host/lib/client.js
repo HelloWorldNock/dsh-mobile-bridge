@@ -245,6 +245,51 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * 运行日志卡片。
+     *
+     * 只负责展示与派发回调：展开/收起、读取中、复制、刷新、导出链接都在这里，
+     * 真正的取数仍在 `PanelBody`（`loadLogs` 走 loopback 的 `/api/setup/logs`）。
+     */
+    function LogCard({ logsPath, open, busy, text, onToggle, onCopy, onRefresh, baseUrl }) {
+      return h(
+        "div",
+        { className: "dmb-card" },
+        h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "运行日志"),
+        h(
+          "div",
+          { className: "dmb-setting" },
+          h(
+            "div",
+            { className: "grow" },
+            h("div", { className: "name" }, "bridge.log"),
+            h(
+              "div",
+              { className: "hint" },
+              logsPath
+                ? `手机连不上、审批不同步之类的怪问题，导出这个文件发出去就行：${logsPath}`
+                : "这次运行没有落盘（只保留在内存里），重启后清空。",
+            ),
+          ),
+          h("button", { className: "dmb-btn", onClick: onToggle }, open ? "收起日志" : "查看最近日志"),
+          h(
+            "a",
+            { className: "dmb-btn primary", href: `${baseUrl}/api/setup/logs?lines=800`, download: "dsh-remote-host.log" },
+            "导出日志文件",
+          ),
+        ),
+        open ? h("div", { className: "dmb-log" }, busy && !text ? "读取中…" : text || "（还没有日志）") : null,
+        open
+          ? h(
+              "div",
+              { className: "dmb-actions", style: { marginTop: 10 } },
+              h("button", { className: "dmb-btn", onClick: onCopy }, "复制全部"),
+              h("button", { className: "dmb-btn", onClick: onRefresh, disabled: busy }, busy ? "读取中…" : "刷新"),
+            )
+          : null,
+      )
+    }
+
 
     /**
      * 宿主兼容性横幅。探针在 DSH 启动时跑一次，结果随 /api/setup/state 下发：
@@ -994,42 +1039,16 @@ window.__ModuleLoader__.load({
               )
             : null,
           snap
-            ? h(
-                "div",
-                { className: "dmb-card" },
-                h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "运行日志"),
-                h(
-                  "div",
-                  { className: "dmb-setting" },
-                  h(
-                    "div",
-                    { className: "grow" },
-                    h("div", { className: "name" }, "bridge.log"),
-                    h(
-                      "div",
-                      { className: "hint" },
-                      snap.logs?.path
-                        ? `手机连不上、审批不同步之类的怪问题，导出这个文件发出去就行：${snap.logs.path}`
-                        : "这次运行没有落盘（只保留在内存里），重启后清空。",
-                    ),
-                  ),
-                  h("button", { className: "dmb-btn", onClick: toggleLogs }, logOpen ? "收起日志" : "查看最近日志"),
-                  h(
-                    "a",
-                    { className: "dmb-btn primary", href: `${BASE}/api/setup/logs?lines=800`, download: "dsh-remote-host.log" },
-                    "导出日志文件",
-                  ),
-                ),
-                logOpen ? h("div", { className: "dmb-log" }, logBusy && !logText ? "读取中…" : logText || "（还没有日志）") : null,
-                logOpen
-                  ? h(
-                      "div",
-                      { className: "dmb-actions", style: { marginTop: 10 } },
-                      h("button", { className: "dmb-btn", onClick: copyLogs }, "复制全部"),
-                      h("button", { className: "dmb-btn", onClick: loadLogs, disabled: logBusy }, logBusy ? "读取中…" : "刷新"),
-                    )
-                  : null,
-              )
+            ? h(LogCard, {
+                logsPath: snap.logs?.path,
+                open: logOpen,
+                busy: logBusy,
+                text: logText,
+                onToggle: toggleLogs,
+                onCopy: copyLogs,
+                onRefresh: loadLogs,
+                baseUrl: BASE,
+              })
             : null,
           snap
             ? h(
