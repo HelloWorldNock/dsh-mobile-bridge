@@ -1,6 +1,6 @@
 ﻿import http from 'node:http'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { BridgeError } from './auth.js'
 import { lanAddresses, resolveDshHome } from './state.js'
@@ -9,17 +9,24 @@ import { imageRefsOf, projectRecords, serializeSummary } from './dto.js'
 import { normalizeBaseUrl } from './group.js'
 import { readSessionRecords } from './history.js'
 import { formatLogBundle } from './logs.js'
+import {
+  IMAGE_MEDIA_TYPES,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_TOTAL_BYTES,
+  MAX_IMAGES,
+  MAX_PROMPT_CHARS,
+  MAX_TITLE_CHARS,
+  cleanTitle,
+  promptContent,
+  validTimeZone
+} from './services/prompt.js'
+import { clampLogLines, fileStamp, samePath, toEpochMillis } from './services/format.js'
+import { createWorkspaceRoutes } from './routes/workspaces.js'
 import { createSessionAdapter } from './adapters/dsh/session-adapter.js'
 import { createWorkspaceAdapter } from './adapters/dsh/workspace-adapter.js'
 
 const MAX_BODY_BYTES = 33_554_432
-const MAX_PROMPT_CHARS = 20_000
-const MAX_TITLE_CHARS = 200
 const MAX_HISTORY = 80
-const MAX_IMAGES = 4
-const MAX_IMAGE_BYTES = 8_388_608
-const MAX_IMAGE_TOTAL_BYTES = 16_777_216
-const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const LOCAL_ORIGIN = /^(?:https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?|dsh-app:\/\/[^/]+)$/
 
 const MAX_ARTIFACT_FILES = 200
@@ -157,16 +164,6 @@ function sendText(res, status, text, filename = null) {
   res.end(body)
 }
 
-function fileStamp(date = new Date()) {
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
-}
-
-function clampLogLines(value, fallback = 400) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return fallback
-  return Math.min(1_500, Math.max(20, Math.round(n)))
-}
 
 async function readJson(req) {
   const chunks = []
@@ -188,65 +185,6 @@ async function readJson(req) {
   }
 }
 
-function validTimeZone(value) {
-  if (typeof value !== 'string' || value.length > 64) return undefined
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: value })
-    return value
-  } catch {
-    return undefined
-  }
-}
-
-function promptContent(text, images) {
-  const content = []
-  if (text !== '') content.push({ type: 'text', text })
-  if (images === undefined) return content
-  if (!Array.isArray(images)) throw new BridgeError('prompt/image-invalid', '图片格式不正确', 400)
-  if (images.length > MAX_IMAGES) throw new BridgeError('prompt/too-many-images', `最多发送 ${MAX_IMAGES} 张图片`, 400)
-  let total = 0
-  for (const image of images) {
-    if (image === null || typeof image !== 'object') throw new BridgeError('prompt/image-invalid', '图片格式不正确', 400)
-    const mediaType = image.mediaType
-    if (typeof mediaType !== 'string' || !IMAGE_MEDIA_TYPES.has(mediaType)) {
-      throw new BridgeError('prompt/image-invalid', '只支持 PNG、JPEG、WebP 或 GIF 图片', 400)
-    }
-    const data = image.data
-    if (typeof data !== 'string' || data.length === 0 || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) {
-      throw new BridgeError('prompt/image-invalid', '图片数据不是合法的 base64', 400)
-    }
-    const bytes = Buffer.byteLength(data, 'base64')
-    if (bytes > MAX_IMAGE_BYTES) throw new BridgeError('prompt/image-too-large', '单张图片过大', 413)
-    total += bytes
-    if (total > MAX_IMAGE_TOTAL_BYTES) throw new BridgeError('prompt/image-too-large', '图片总大小过大', 413)
-    const part = { type: 'image', mediaType, data }
-    if (typeof image.name === 'string' && image.name.trim() !== '') part.name = image.name.trim().slice(0, 120)
-    content.push(part)
-  }
-  return content
-}
-
-function cleanTitle(value) {
-  if (typeof value !== 'string') throw new BridgeError('session/bad-title', '标题必须是字符串', 400)
-  const title = value.replace(/[\u0000-\u001f\u007f]/g, ' ').trim()
-  if (title === '' || title.length > MAX_TITLE_CHARS) throw new BridgeError('session/bad-title', '标题长度必须在 1–200 之间', 400)
-  return title
-}
-
-// 桌面端工作区记录里的 updatedAt 可能是 Date、ISO 字符串或毫秒数；
-// 统一成毫秒数，避免手机端把工作区列表整段解析失败。
-function toEpochMillis(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (value instanceof Date) {
-    const time = value.getTime()
-    return Number.isFinite(time) ? time : undefined
-  }
-  if (typeof value === 'string' && value.trim() !== '') {
-    const time = Date.parse(value)
-    return Number.isFinite(time) ? time : undefined
-  }
-  return undefined
-}
 
 export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null, updater = null, logs = null, compatibility = null }) {
   const csrf = randomBytes(24).toString('base64url')
@@ -358,11 +296,6 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
   }
 
-  function samePath(left, right) {
-    const a = resolve(left)
-    const b = resolve(right)
-    return process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
-  }
 
   /** cwd 命中已登记的工作区时，让会话挂到那个工作区，而不是落到「未分组」。 */
   function matchWorkspace(dir) {
@@ -509,17 +442,6 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   }
 
   /** 手机传来的只是文件夹名，不是路径：去掉分隔符和 Windows 非法字符，杜绝跳出根目录。 */
-  function cleanFolderName(raw) {
-    if (typeof raw !== 'string') return null
-    const name = raw
-      .trim()
-      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
-      .replace(/\s+$/g, '')
-      .slice(0, 60)
-      .trim()
-    if (name === '' || name === '.' || name === '..') return null
-    return name
-  }
 
   /** 协作工作区：优先用面板选中的 DSH 工作区（id 指向 registry 里的真实目录），
    * 其次用绝对路径的协作目录。相对路径一律忽略——它会被 DSH 按进程 cwd 解析成
@@ -644,6 +566,15 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   function service(name) {
     return typeof ctx.get === 'function' ? ctx.get(name) : ctx[name]
   }
+
+  const workspaceRoutes = createWorkspaceRoutes({
+    sendJson,
+    readJson,
+    workspaceList,
+    workspaceRoot,
+    archivedSessionIdSet,
+    workspaces
+  })
 
   async function route(req, res) {
     const url = new URL(req.url ?? '/', 'http://bridge.local')
@@ -899,72 +830,8 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       return
     }
 
-    if (method === 'GET' && path === '/api/workspaces') {
-      const list = workspaceList()
-      const archived = archivedSessionIdSet()
-      sendJson(res, 200, {
-        root: workspaceRoot(),
-        // 归档会话不参与分组：App 按 sessionIds 归组，留着它只会得到空分组。
-        workspaces: list.map((workspace) => ({
-          id: workspace.id,
-          path: workspace.path,
-          title: workspace.title,
-          updatedAt: toEpochMillis(workspace.updatedAt),
-          sessionIds: (workspace.sessionIds ?? []).filter((sessionId) => !archived.has(sessionId))
-        })),
-        archivedSessionIds: [...archived]
-      })
-      return
-    }
+    if (await workspaceRoutes({ req, res, url, method, path })) return
 
-    // 手机端新建工作区：在默认工作区目录下建一个子目录，并登记成 DSH 工作区。
-    if (method === 'POST' && path === '/api/workspaces') {
-      const root = workspaceRoot()
-      if (root === null) {
-        throw new BridgeError(
-          'workspace/no-root',
-          '电脑端还没设置默认工作区目录，先在「手机桥接」设置里填一个文件夹',
-          409
-        )
-      }
-      const body = await readJson(req)
-      const name = cleanFolderName(body.name)
-      if (name === null) throw new BridgeError('workspace/bad-name', '文件夹名不合法', 400)
-      const target = resolve(root, name)
-      const rel = relative(root, target)
-      if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || rel.includes(sep)) {
-        throw new BridgeError('workspace/bad-name', '文件夹名不合法', 400)
-      }
-      if (!workspaces.supports('create')) {
-        throw new BridgeError('workspace/unavailable', '当前 Host 不能创建工作区', 503)
-      }
-      // resolveByPath 在 0.2.x 是 async：不 await 会拿到 Promise（恒真），
-      // 建目录与 registry.create 全被跳过，接口只剩下一个空 workspace。
-      let workspace = await workspaces.resolveByPath(target)
-      if (workspace === undefined || workspace === null) {
-        if (existsSync(target)) {
-          if (!statSync(target).isDirectory()) throw new BridgeError('workspace/exists', '已有同名文件', 409)
-        } else {
-          try {
-            mkdirSync(target)
-          } catch (error) {
-            throw new BridgeError('workspace/create-failed', `建目录失败：${String(error?.message ?? error)}`, 409)
-          }
-        }
-        workspace = await workspaces.create(target, name)
-      }
-      sendJson(res, 200, {
-        root,
-        workspace: {
-          id: workspace.id,
-          path: workspace.path,
-          title: workspace.title,
-          updatedAt: toEpochMillis(workspace.updatedAt),
-          sessionIds: workspace.sessionIds ?? []
-        }
-      })
-      return
-    }
 
     if (method === 'GET' && path === '/api/group') {
       sendJson(res, 200, { ...(group?.snapshot?.() ?? { group: null, peers: [], invite: null }), collabRoot: collabRoot() })
