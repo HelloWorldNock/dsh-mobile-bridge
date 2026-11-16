@@ -82,6 +82,21 @@ L2；Keystore 加密与网络策略 L1 + 可构建；端到端主链路仍缺一
 
 ## 4. 发版动作清单
 
+**一条命令**（推荐）：
+
+```powershell
+node tools/release.mjs --version <v> --notes docs/RELEASE-<v>.md --dry-run   # 先看计划
+node tools/release.mjs --version <v> --notes docs/RELEASE-<v>.md             # 真发
+# 构建失败后可从某一步续跑： --from build-apk
+# 只发 host 包（纯文档/工具改动）： --skip-build
+```
+
+脚本依次做：`preflight → bump → pack → build-apk → sums → gates → commit → tag → push → release`，
+并把 `verify-package` + `verify-apk-signature` + `check.mjs` + `node --test` 四道门禁串在里面；
+环境上的两个坑（push 要 openssl 后端 + 本地代理、gh 要清空代理）也已内置。
+
+下面的手工步骤留作对照/应急：
+
 ```powershell
 # 1) 三处版本号：host/package.json、host/lib/index.js 的 VERSION、android/app/build.gradle.kts
 # 2) 重建产物

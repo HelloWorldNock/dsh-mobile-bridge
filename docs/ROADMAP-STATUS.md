@@ -46,6 +46,12 @@
 | R26 | 签名 + ABI 拆分 | ◐（链路齐、密钥待你生成） | 拆分已生效（单包 65 → 34 MB）；签名链路 + `tools/make-keystore.ps1`（一条命令生成密钥与 properties）+ `tools/verify-apk-signature.ps1`（G05 门禁，已在 debug 包上证到 v1–v4 与 `CN=Android Debug`）。**私钥仍需你本地生成**：本次执行环境禁止创建 `.jks` |
 | R27 | always-allow / 模型切换 / fork / 子代理控制 | ⏸ | 路线本身标为低优先，等范围决策 |
 
+## 发版方式（0.9.15 起）
+
+`node tools/release.mjs --version <v> --notes docs/RELEASE-<v>.md` 一条命令跑完
+bump → 打包 → 构建 → 哈希 → 四道门禁 → 提交/打 tag/推送 → GitHub Release；
+`--dry-run` 只看计划，`--from <step>` 断点续跑。v0.9.15 本身就是用它发的。
+
 ## 还没做完的三件事
 
 1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层，剩下的 A5/A7/A9–A12/A15/A18–A20 需要一台真机

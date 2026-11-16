@@ -268,7 +268,7 @@ powershell -File tools/test-android.ps1               # Android 数据层 34 例
 node tools/verify-package.mjs                         # 包一致性门禁
 ```
 
-全部门禁、五级验收口径与测试盲区见 **[docs/TESTING.md](docs/TESTING.md)**；验收矩阵可直接跑 `node tools/acceptance.mjs`。
+全部门禁、五级验收口径与测试盲区见 **[docs/TESTING.md](docs/TESTING.md)**；验收矩阵跑 `node tools/acceptance.mjs`，发版跑 `node tools/release.mjs --version <v> --notes docs/RELEASE-<v>.md`。
 
 ## HTTP API 摘要
 
