@@ -127,12 +127,18 @@ async function readVersionSources() {
   }
 }
 
-async function listSourceLib(dir) {
+async function listSourceLib(dir, prefix = 'lib') {
   const out = []
   for (const entry of await readdir(dir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith('.js')) continue
     const full = join(dir, entry.name)
-    out.push({ rel: `lib/${entry.name}`, full })
+    const rel = `${prefix}/${entry.name}`
+    if (entry.isDirectory()) {
+      // 适配层之类的子目录也要比：`lib/adapters/dsh/*.js`
+      out.push(...(await listSourceLib(full, rel)))
+      continue
+    }
+    if (!entry.isFile() || !entry.name.endsWith('.js')) continue
+    out.push({ rel, full })
   }
   out.sort((a, b) => a.rel.localeCompare(b.rel))
   return out

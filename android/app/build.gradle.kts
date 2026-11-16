@@ -13,8 +13,8 @@ android {
         applicationId = "com.ts7.dshremote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "0.9.0"
+        versionCode = 22
+        versionName = "0.9.1"
     }
 
     buildTypes {

@@ -1,4 +1,4 @@
-import http from 'node:http'
+﻿import http from 'node:http'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -9,6 +9,8 @@ import { imageRefsOf, projectRecords, serializeSummary } from './dto.js'
 import { normalizeBaseUrl } from './group.js'
 import { readSessionRecords } from './history.js'
 import { formatLogBundle } from './logs.js'
+import { createSessionAdapter } from './adapters/dsh/session-adapter.js'
+import { createWorkspaceAdapter } from './adapters/dsh/workspace-adapter.js'
 
 const MAX_BODY_BYTES = 33_554_432
 const MAX_PROMPT_CHARS = 20_000
@@ -248,6 +250,9 @@ function toEpochMillis(value) {
 
 export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null, updater = null, logs = null, compatibility = null }) {
   const csrf = randomBytes(24).toString('base64url')
+  // 宿主接口全部走适配层：签名漂移、异步化、可选能力都在适配层收口（见 lib/adapters/dsh/）。
+  const sessions = createSessionAdapter(ctx)
+  const workspaces = createWorkspaceAdapter(ctx)
   let server = null
 
   function checkCsrf(req) {
@@ -289,15 +294,14 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   }
 
   async function allSummaries(signal) {
-    const value = await ctx.sessionController.list({}, signal)
-    return value.items.map((summary) => serializeSummary(summary)).filter((item) => item !== null)
+    const items = await sessions.list(signal)
+    return items.map((summary) => serializeSummary(summary)).filter((item) => item !== null)
   }
 
   function visibleSessionIds() {
-    const registry = ctx.workspaceRegistry
-    if (typeof registry?.list !== 'function') return null
+    if (!workspaces.supports('list')) return null
     const ids = new Set()
-    for (const workspace of registry.list()) {
+    for (const workspace of workspaces.list()) {
       for (const sessionId of workspace.sessionIds ?? []) ids.add(sessionId)
     }
     return ids
@@ -310,12 +314,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
    * 处理，绝不能因此把整个列表清空。
    */
   function archivedSessionIdSet() {
-    try {
-      const value = ctx.workspaceRegistry?.archivedSessionIds
-      return new Set(Array.isArray(value) ? value : [])
-    } catch {
-      return new Set()
-    }
+    return workspaces.archivedIds()
   }
 
   async function listSummaries(signal) {
@@ -332,16 +331,15 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
 
   /** 把会话从工作区里摘掉并删除落盘文件；返回被删掉的目录列表。 */
   async function purgeSession(sessionId) {
-    const registry = ctx.workspaceRegistry
-    if (typeof registry?.list === 'function') {
+    if (workspaces.supports('list')) {
       try {
-        await registry.unarchiveSession?.(sessionId)
+        if (workspaces.supports('unarchiveSession')) await workspaces.unarchive(sessionId)
       } catch {
         // not archived
       }
-      for (const workspace of registry.list()) {
+      for (const workspace of workspaces.list()) {
         try {
-          await workspace.detachSession(sessionId)
+          await workspaces.detach(workspace, sessionId)
         } catch {
           // not a member of this workspace
         }
@@ -397,7 +395,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   }
 
   async function ensureAgent(sessionId) {
-    const result = await ctx.sessionController.resolveAgent(sessionId)
+    const result = await sessions.resolveAgent(sessionId)
     if (result?.agent !== undefined) return result.agent
     throw new BridgeError('session/not-live', result?.error ?? '会话当前没有可交互的 Agent', 409)
   }
@@ -496,13 +494,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   }
 
   function workspaceList() {
-    const registry = ctx.workspaceRegistry
-    if (typeof registry?.list !== 'function') return []
-    try {
-      return registry.list()
-    } catch {
-      return []
-    }
+    return workspaces.list()
   }
 
   /**
@@ -908,7 +900,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
 
     if (method === 'GET' && path === '/api/workspaces') {
-      const list = typeof ctx.workspaceRegistry?.list === 'function' ? ctx.workspaceRegistry.list() : []
+      const list = workspaceList()
       const archived = archivedSessionIdSet()
       sendJson(res, 200, {
         root: workspaceRoot(),
@@ -943,13 +935,12 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       if (rel === '' || rel.startsWith('..') || isAbsolute(rel) || rel.includes(sep)) {
         throw new BridgeError('workspace/bad-name', '文件夹名不合法', 400)
       }
-      const registry = ctx.workspaceRegistry
-      if (typeof registry?.create !== 'function') {
+      if (!workspaces.supports('create')) {
         throw new BridgeError('workspace/unavailable', '当前 Host 不能创建工作区', 503)
       }
       // resolveByPath 在 0.2.x 是 async：不 await 会拿到 Promise（恒真），
       // 建目录与 registry.create 全被跳过，接口只剩下一个空 workspace。
-      let workspace = typeof registry.resolveByPath === 'function' ? await registry.resolveByPath(target) : undefined
+      let workspace = await workspaces.resolveByPath(target)
       if (workspace === undefined || workspace === null) {
         if (existsSync(target)) {
           if (!statSync(target).isDirectory()) throw new BridgeError('workspace/exists', '已有同名文件', 409)
@@ -960,7 +951,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
             throw new BridgeError('workspace/create-failed', `建目录失败：${String(error?.message ?? error)}`, 409)
           }
         }
-        workspace = await registry.create(target, name)
+        workspace = await workspaces.create(target, name)
       }
       sendJson(res, 200, {
         root,
@@ -1085,7 +1076,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         assertPeerSession(identity, summary)
         session = { sessionId: continueId, agentPreset: null }
       } else {
-        session = await ctx.sessionController.create(request)
+        session = await sessions.create(request)
       }
       const sessionId = session.sessionId
 
@@ -1111,7 +1102,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       const hasPrompt = text !== '' || (Array.isArray(body.images) && body.images.length > 0)
       if (hasPrompt) {
         try {
-          await ctx.sessionController.prompt(
+          await sessions.prompt(
             {
               requestId: randomUUID(),
               sessionId,
@@ -1203,16 +1194,16 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
 
       // 归档 / 取消归档：和 PC 端共用 registry 的全局归档集合，手机不再各存一份。
       if (method === 'POST' && (action === 'archive' || action === 'unarchive')) {
-        const registry = ctx.workspaceRegistry
         const archiving = action === 'archive'
         const op = archiving ? 'archiveSession' : 'unarchiveSession'
-        if (typeof registry?.[op] !== 'function') {
+        if (!workspaces.supports(op)) {
           throw new BridgeError('session/archive-unavailable', '当前 Host 不支持归档会话', 501)
         }
         const summary = await findSummary(sessionId)
         if (summary === null) throw new BridgeError('session/not-found', '会话不存在', 404)
         try {
-          await registry[op](sessionId)
+          if (archiving) await workspaces.archive(sessionId)
+          else await workspaces.unarchive(sessionId)
         } catch (error) {
           if (error?.name === 'WorkspaceActiveSessionError') {
             throw new BridgeError('session/active', '会话正在运行，先停止再归档', 409)
@@ -1251,7 +1242,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         const hasImages = Array.isArray(body.images) && body.images.length > 0
         if (text === '' && !hasImages) throw new BridgeError('prompt/empty', '内容不能为空', 400)
         if (text.length > MAX_PROMPT_CHARS) throw new BridgeError('prompt/too-long', '内容过长', 400)
-        await ctx.sessionController.prompt(
+        await sessions.prompt(
           {
             requestId: randomUUID(),
             sessionId,
@@ -1266,7 +1257,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       }
 
       if (method === 'POST' && action === 'cancel') {
-        await ctx.sessionController.cancel({ sessionId })
+        await sessions.cancel(sessionId)
         sendJson(res, 200, { accepted: true })
         return
       }
@@ -1274,7 +1265,7 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       if (method === 'POST' && action === 'rename') {
         const body = await readJson(req)
         const title = cleanTitle(body.title)
-        const value = await ctx.sessionController.rename({ sessionId, title })
+        const value = await sessions.rename(sessionId, title)
         sendJson(res, 200, value)
         return
       }

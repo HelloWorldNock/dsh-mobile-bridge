@@ -57,17 +57,30 @@ ctx.approval / ctx.userQuestions / ctx.commands
 ```
 host/                 DSH host 插件（无构建步骤，ESM）
   lib/                server / auth / events / approvals / dto / discovery ...
-  test/               node:test 测试
+  lib/adapters/dsh/   宿主适配层（session / workspace），隔离 DSH 版本差异
+  test/               node:test 测试；test/integration/ 是真实宿主契约用例
   locale/             市场卡片标题与描述（zh / en）
   icon.png            插件图标（≤ 256 KiB）
 contrib/              分发元数据：awesome-dsh-plugin YAML、dshmarket plugins.json
-tools/                打包脚本 pack-plugin.ps1、图标生成、重启脚本、发现中继
-android/              Android 客户端（Gradle + Compose）
+tools/                打包脚本 pack-plugin.ps1、包一致性门禁 verify-package.mjs、
+                      Android 单测 test-android.ps1、图标生成、重启脚本、发现中继
+android/              Android 客户端（Gradle + Compose，含 gradlew wrapper）
+  src/test/           JVM 单测（数据层纯逻辑）
   gobridge/           内嵌 Tailscale 的 Go 源码（gomobile 生成 AAR）
   app/libs/           预编译 gobridge.aar（arm64-v8a + x86_64）
 dist/                 debug APK 与插件 tgz 产物
 .toolchain/           JDK17 / Android SDK / Gradle / Go（本地工具链）
+docs/                 契约与流程：API / SECURITY / RELEASE-* / STAGE*/CLOSEOUT / ACCEPTANCE
 ```
+
+### 文档地图（改代码前先看这三份）
+
+| 要看什么 | 在哪 |
+|---|---|
+| 接口字段、错误码、SSE 事件 | [`docs/API.md`](docs/API.md) |
+| 凭据/角色/授权边界 | [`docs/SECURITY.md`](docs/SECURITY.md) |
+| 每轮改了什么、验证到哪一级 | [`docs/STAGE2-2026-11-17.md`](docs/STAGE2-2026-11-17.md)、[`docs/CLOSEOUT-0.8.9.md`](docs/CLOSEOUT-0.8.9.md)、[`docs/RELEASE-0.9.0.md`](docs/RELEASE-0.9.0.md) |
+| 真机怎么验 | [`docs/ACCEPTANCE-0.8.9.md`](docs/ACCEPTANCE-0.8.9.md) |
 
 ## 安装 host 插件（desktop profile）
 
@@ -336,6 +349,8 @@ DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧�
 ## HTTP API 摘要
 
 鉴权：`Authorization: Bearer dshm_...`。错误统一 `{"error":{"code","message"}}`。
+
+**完整契约（字段、错误码、SSE 事件、宿主兼容说明）见 [`docs/API.md`](docs/API.md)，本文只列摘要。**
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

@@ -1,5 +1,7 @@
-import { projectEvent, projectRecords, projectStreamFrame, serializeSummary } from './dto.js'
+﻿import { projectEvent, projectRecords, projectStreamFrame, serializeSummary } from './dto.js'
 import { isSubagentAddressError } from './history.js'
+import { createSessionAdapter } from './adapters/dsh/session-adapter.js'
+import { createWorkspaceAdapter } from './adapters/dsh/workspace-adapter.js'
 
 const HEARTBEAT_MS = 20_000
 const SLOW_CLIENT_BYTES = 4 * 1024 * 1024
@@ -120,6 +122,8 @@ export function createBroadcaster({ logger }) {
 }
 
 export function createSessionHub({ ctx, controller, broadcast, logger, onTurnEnd, onTurnError }) {
+  const sessionAdapter = createSessionAdapter(ctx)
+  const workspaceAdapter = createWorkspaceAdapter(ctx)
   const follows = new Map()
   const summaries = new Map()
 
@@ -313,8 +317,8 @@ broadcast.broadcast('session.error', { sessionId: state.sessionId, message: Stri
   }
 
   async function refreshOne(sessionId) {
-    const value = await controller.list({}, new AbortController().signal)
-    const summary = value.items.find((item) => item.sessionId === sessionId)
+    const items = await sessionAdapter.list(new AbortController().signal)
+    const summary = items.find((item) => item.sessionId === sessionId)
     return summary === undefined ? undefined : cacheSummary(summary)
   }
 
@@ -328,13 +332,8 @@ broadcast.broadcast('session.error', { sessionId: state.sessionId, message: Stri
   let archiveSignature = null
 
   function archivedIds() {
-    try {
-      const value = ctx.workspaceRegistry?.archivedSessionIds
-      return Array.isArray(value) ? value : null
-    } catch {
-      // registry 还没就绪：这一轮当作「读不到」，不要推翻已建立的基线。
-      return null
-    }
+    // null = 这一轮读不到（registry 还没就绪），调用方不要推翻已建立的基线。
+    return workspaceAdapter.archivedIdsOrNull()
   }
 
   function syncArchive() {
