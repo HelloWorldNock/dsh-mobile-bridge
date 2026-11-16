@@ -2,7 +2,7 @@
 
 - 目标：http://127.0.0.1:48123
 - 宿主版本：0.8.8
-- 时间：2026-11-16T19:39:08.591Z
+- 时间：2026-11-16T19:56:34.805Z
 - 结果：**12 通过 / 1 失败 / 9 跳过**
 
 | 项 | 内容 | 结果 | 备注 |
@@ -10,15 +10,15 @@
 | A0 | 健康检查与设备身份 | ✅ | v0.8.8 · G3RNTSW6 |
 | A1 | 配对：面板码换设备 token | ✅ | deviceId=G3RNTSW6 |
 | A1b | 鉴权：错码与无 token 都被拒 | ✅ | 错码 401 · 无 token 401 · 伪造 401 |
-| A2 | 任务列表：只返回工作区内的非归档会话 | ✅ | 37 个会话 / 13 个工作区 / 归档 66 |
-| A3 | 新建会话并派 prompt | ✅ | session-1ffe13db-c259-4dde-96b5-0c7f155bb950 @ TS0-2 无限制测试 |
-| A4 | 流式一轮跑完并落盘 | ✅ | 18403 ms · 3 条记录 |
+| A2 | 任务列表：只返回工作区内的非归档会话 | ✅ | 42 个会话 / 13 个工作区 / 归档 67 |
+| A3 | 新建会话并派 prompt | ✅ | session-9d99f179-2a8d-4165-af1b-5962790400ac @ TS0-2 无限制测试 |
+| A4 | 流式一轮跑完并落盘 | ✅ | 4074 ms · 3 条记录 |
 | A8 | 图片校验：超过 4 张被拒 | ❌ | 错误码不对：session/prompt-failed |
 | A13 | 归档：会话从列表消失 | ✅ | 列表已剔除 · archivedSessionIds 已包含 |
 | A14 | 取消归档：会话回到列表 | ✅ | 已回到列表 |
-| A16 | 日志导出：手机侧拿到文本 | ✅ | 2579 字 · 路径 C:\Users\Administrator\.dsh\storages\mobile-bridge\logs\bridge.log |
-| A17 | 日志导出：面板侧（loopback）拿到 .log | ✅ | 2579 字 |
-| A20 | 彻底删除：停止后删除会话日志目录 | ✅ | session-90062b73-b… 驻留内存（409 session/loaded），按契约需重启后删除 |
+| A16 | 日志导出：手机侧拿到文本 | ✅ | 3232 字 · 路径 C:\Users\Administrator\.dsh\storages\mobile-bridge\logs\bridge.log |
+| A17 | 日志导出：面板侧（loopback）拿到 .log | ✅ | 3232 字 |
+| A20 | 彻底删除：停止后删除会话日志目录 | ✅ | session-4a8f4fec-0… 驻留内存（409 session/loaded），按契约需重启后删除 |
 | A21 | 事件流鉴权：无 token 401，伪造 token 401 | ✅ | 无 token 401 · 伪造 401 |
 | A5 | 审批链路（脚本代答 allow-once） | ⬜ | 默认跳过：加 --approvals 才会真的让模型调一次 shell 工具 |
 | A7 | plan-review 卡与代答（只答「继续规划」） | ⬜ | 默认跳过：加 --approvals 才会真的让模型进入计划模式 |

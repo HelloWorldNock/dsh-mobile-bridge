@@ -52,7 +52,17 @@
 bump → 打包 → 构建 → 哈希 → 四道门禁 → 提交/打 tag/推送 → GitHub Release；
 `--dry-run` 只看计划，`--from <step>` 断点续跑；流程里含 `pointers` 一步（把 README/contrib/ROADMAP 的版本引用一并改掉）。v0.9.15 本身就是用它发的。
 
-## 需要仓库主人做的两件事（当前唯一阻塞）
+## 为什么停在这里（两条硬阻塞 + 一条范围决策）
+
+三项都不是「还能再改改代码」能推进的：
+
+| 阻塞 | 具体条件 | 已持续 | 需要你做什么 |
+|---|---|---|---|
+| R26 发布签名 | 本机执行环境禁止创建 `.jks`（安全策略命中 `secret.ext.jks`） | 从 R26 起 | 跑一次 `tools/make-keystore.ps1` |
+| R09 真机矩阵 | 本机没有 Android 设备/模拟器（`adb` 不存在，MuMu 未安装） | 从 R09 起 | 连一台真机，按下面清单逐项点按 |
+| R27 功能范围 | 路线本身标为低优先，需要你来定要不要做 | 从读路线起 | 一句话决定范围 |
+
+## 需要仓库主人做的两件事
 
 ### 1. 生成发布私钥（R26 最后一步）
 
@@ -106,12 +116,15 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 2. **R26 发布私钥**：跑一次 `tools/make-keystore.ps1` 即可（密钥与口令由它生成并写进已 gitignore 的位置）；我这边的执行环境禁止创建 `.jks`，所以只能把链路和门禁做到「一条命令可用」。
 3. ~~R22 剩余~~：已完成（九个区块组件化）。
 
-## 当前质量基线（0.9.8）
+## 当前质量基线（0.9.15）
 
 ```
 host      : 27 模块 / 185 例（184 过 + 1 集成用例默认跳过）
 android   : 55 例
-门禁      : verify-package PASS（38 文件 / 26 个 lib/** 同哈希，版本三处一致）
-构建      : assembleDebug / assembleRelease 均成功（versionCode 36，ABI 三包）
+门禁      : `node tools/gates.mjs` → **8 通过 / 0 失败 / 6 需人工**
+            （G01 包一致 · G02 测试含 G07/G08 · G03 语法 · G05 签名 · G13 字段契约 ·
+             G14 路由契约 · G15 凭据契约 · G12 发布信息；
+             需人工：G06/G09/G10/G11 真机 + G04b Release 构建待私钥）
+构建      : assembleDebug 成功（versionCode 36，ABI 三包）；assembleRelease 待私钥后再验
 发布      : 最新 v0.9.15（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
 ```
