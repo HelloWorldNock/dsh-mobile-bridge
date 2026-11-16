@@ -52,7 +52,9 @@ data class ClosedEnvelope(
 data class SessionIdEnvelope(
     val sessionId: String,
     val message: String? = null,
-    val updatedAt: Long? = null
+    val updatedAt: Long? = null,
+    /** `session.removed` 带它：true 表示是归档而不是删除，手机可以就地取消归档。 */
+    val archived: Boolean = false
 )
 
 @Serializable

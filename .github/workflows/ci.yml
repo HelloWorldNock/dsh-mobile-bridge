@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  host:
+    name: host checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: host
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # check.mjs 校验 18 个模块的导出面；node --test 跑 101 个用例（本机约 4 秒）。
+      - name: module surface
+        run: node scripts/check.mjs
+
+      - name: unit tests
+        run: node --test --test-reporter=spec
+
+  package:
+    name: package consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 打包后立刻过一致性门禁：tgz 内 lib/*.js 必须与源码逐文件同哈希，
+      # 且 package.json / lib/index.js / build.gradle.kts 三处版本号一致。
+      - name: pack
+        working-directory: host
+        run: npm pack --pack-destination "$RUNNER_TEMP/pack"
+
+      - name: verify package
+        run: |
+          VERSION=$(node -p "require('./host/package.json').version")
+          node tools/verify-package.mjs --tarball "$RUNNER_TEMP/pack/dsh-mobile-bridge-$VERSION.tgz"

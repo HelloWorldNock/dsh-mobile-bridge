@@ -192,7 +192,9 @@ data class Workspace(
 @Serializable
 data class WorkspaceList(
     val workspaces: List<Workspace> = emptyList(),
-    val root: String? = null
+    val root: String? = null,
+    /** 桌面端归档集合（与 `/api/workspaces` 同源），手机用它决定能不能「取消归档」。 */
+    val archivedSessionIds: List<String> = emptyList()
 )
 
 @Serializable

@@ -51,6 +51,8 @@ data class AppState(
     val sessions: List<SessionSummary> = emptyList(),
     val activeSessionId: String? = null,
     val detail: SessionDetail? = null,
+    /** 当前打开的任务已被归档：菜单里显示「取消归档」而不是「归档会话」。 */
+    val activeArchived: Boolean = false,
     val timeline: List<TimelineItem> = emptyList(),
     val streamText: String = "",
     val pending: PendingState = PendingState(),

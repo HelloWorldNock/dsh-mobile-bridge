@@ -81,6 +81,13 @@ class BridgeRepository(
         var pending: PendingState = PendingState()
         var workspaces: List<Workspace> = emptyList()
 
+        /**
+         * 桌面端的归档集合。归档会话不在任务列表里，但要能反向操作：
+         * `/api/workspaces` 每次刷新带回来，`session.removed(archived=true)` 时补一个，
+         * `session.added` 时删掉。
+         */
+        var archivedSessionIds: Set<String> = emptySet()
+
         /** 桌面端设置的默认工作区目录；为 null 表示手机端不能新建工作区文件夹。 */
         var workspaceRoot: String? = null
         var presets: PresetCatalog = PresetCatalog()
@@ -762,6 +769,7 @@ class BridgeRepository(
         return runCatching {
             client.archive(id)
             runCatching { client.unsubscribe(id) }
+            runtime.archivedSessionIds = runtime.archivedSessionIds + id
             runtime.sessions = runtime.sessions.filterNot { it.id == id }
             runtime.activeSessionId = null
             runtime.pendingOpenSessionId = null
@@ -773,6 +781,33 @@ class BridgeRepository(
             refreshSessions(runtime.profile.id)
         }.onFailure { error ->
             runtime.error = error.message ?: "归档失败"
+            sync()
+        }
+    }
+
+    /**
+     * 取消归档：把这个任务放回工作区原来的位置。
+     *
+     * 触发点有两个：手机上刚归档完又后悔，或者在手机上看着的任务被电脑归档了
+     * （`session.removed(archived=true)` 之后任务会留在屏幕上，菜单变成「取消归档」）。
+     */
+    suspend fun unarchiveActiveSession(): Result<Unit> {
+        val runtime = activeRuntime() ?: return Result.failure(IllegalStateException("未连接"))
+        val id = runtime.activeSessionId ?: runtime.pendingOpenSessionId
+            ?: return Result.failure(IllegalStateException("没有打开任务"))
+        val client = runtime.client ?: return Result.failure(IllegalStateException("未连接"))
+        return runCatching {
+            client.unarchive(id)
+            runtime.archivedSessionIds = runtime.archivedSessionIds - id
+            runtime.notice = null
+            runtime.error = null
+            // 会话回到列表后重新订阅，继续收它的流式事件。
+            runCatching { client.subscribe(id) }
+            runtime.detail = runCatching { client.session(id) }.getOrNull() ?: runtime.detail
+            sync()
+            refreshSessions(runtime.profile.id)
+        }.onFailure { error ->
+            runtime.error = error.message ?: "取消归档失败"
             sync()
         }
     }
@@ -1114,6 +1149,8 @@ class BridgeRepository(
             result
                 .onSuccess { catalog ->
                     runtime.workspaceRoot = catalog.root?.takeIf { it.isNotBlank() }
+                    // 归档集合以桌面端为准：手机只读它来显示「取消归档」。
+                    runtime.archivedSessionIds = catalog.archivedSessionIds.toSet()
                     // 桌面端没有登记工作区时，用已知会话的目录兜底，
                     // 避免任务页一行都选不了。
                     runtime.workspaces = catalog.workspaces.ifEmpty { workspacesFromSessions(runtime.sessions) }
@@ -1322,6 +1359,7 @@ class BridgeRepository(
                 }
                 "session.added", "session.updated" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionEnvelope.serializer(), event.data)
+                    runtime.archivedSessionIds = runtime.archivedSessionIds - envelope.session.id
                     runtime.sessions = upsertList(runtime.sessions, envelope.session)
                     runtime.detail = runtime.detail?.let {
                         if (it.session.id == envelope.session.id) it.copy(session = envelope.session) else it
@@ -1360,14 +1398,19 @@ class BridgeRepository(
                 "session.removed" -> {
                     val envelope = JsonConfig.json.decodeFromString(SessionIdEnvelope.serializer(), event.data)
                     runtime.sessions = runtime.sessions.filterNot { it.id == envelope.sessionId }
-                    if (runtime.activeSessionId == envelope.sessionId) {
+                    if (envelope.archived) {
+                        // 归档不是删除：记下 id，正在看的这个任务留在屏幕上，
+                        // 菜单会变成「取消归档」，用户不用回电脑就能把它放回来。
+                        runtime.archivedSessionIds = runtime.archivedSessionIds + envelope.sessionId
+                    } else if (runtime.activeSessionId == envelope.sessionId) {
                         runtime.activeSessionId = null
                         runtime.pendingOpenSessionId = null
                         runtime.detail = null
                         runtime.timeline = emptyList()
                         runtime.streamText = ""
+                        runtime.assistantTexts.remove(envelope.sessionId)
                     }
-                    runtime.assistantTexts.remove(envelope.sessionId)
+                    if (!envelope.archived) runtime.assistantTexts.remove(envelope.sessionId)
                     sync()
                 }
                 "session.error" -> {
@@ -1528,6 +1571,10 @@ class BridgeRepository(
             sessions = active?.sessions.orEmpty(),
             activeSessionId = active?.activeSessionId,
             detail = active?.detail,
+            activeArchived = active?.let { runtime ->
+                val id = runtime.activeSessionId ?: return@let false
+                id in runtime.archivedSessionIds
+            } ?: false,
             timeline = active?.timeline.orEmpty(),
             streamText = active?.streamText.orEmpty(),
             pending = active?.pending ?: PendingState(),

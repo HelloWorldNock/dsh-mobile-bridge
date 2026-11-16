@@ -5,6 +5,14 @@ import os from 'node:os'
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 
+// 审批 / 提问 / 计划审阅的默认超时。这是全仓唯一一处定义：
+// lib/index.js 的 DEFAULTS 直接引用它，面板（lib/client.js）也按这三个数显示。
+export const TIMEOUT_DEFAULTS = Object.freeze({
+  approvalTimeoutMs: 120_000,
+  questionTimeoutMs: 120_000,
+  planReviewTimeoutMs: 180_000
+})
+
 export function resolveDshHome() {
   return process.env.DSH_HOME && process.env.DSH_HOME.trim() !== ''
     ? process.env.DSH_HOME.trim()
@@ -44,9 +52,9 @@ export function createDefaultState() {
     settings: {
       phoneFirst: true,
       discovery: true,
-      approvalTimeoutMs: 120_000,
-      questionTimeoutMs: 120_000,
-      planReviewTimeoutMs: 180_000,
+      approvalTimeoutMs: TIMEOUT_DEFAULTS.approvalTimeoutMs,
+      questionTimeoutMs: TIMEOUT_DEFAULTS.questionTimeoutMs,
+      planReviewTimeoutMs: TIMEOUT_DEFAULTS.planReviewTimeoutMs,
       collabWorkspaceId: '',
       collabRoot: '',
       workspaceRoot: '',

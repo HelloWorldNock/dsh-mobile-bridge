@@ -96,7 +96,7 @@ import com.ts7.dshremote.ui.theme.TextMuted
 import com.ts7.dshremote.ui.theme.TextPrimary
 import kotlinx.coroutines.launch
 
-private enum class SessionDialog { Rename, Permission, Plan, Stop, Archive, Delete }
+private enum class SessionDialog { Rename, Permission, Plan, Stop, Archive, Unarchive, Delete }
 
 /**
  * 贴底时额外滚动的像素量。简洁模式把大段工具调用压成一行，只滚到最后一项会把它
@@ -235,8 +235,34 @@ fun SessionScreen(
                             }
                         )
                         DropdownMenuItem(text = { Text("停止任务", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Stop })
-                        DropdownMenuItem(text = { Text("归档会话") }, onClick = { menuOpen = false; dialog = SessionDialog.Archive })
+                        if (state.activeArchived) {
+                            DropdownMenuItem(
+                                text = { Text("取消归档") },
+                                onClick = { menuOpen = false; dialog = SessionDialog.Unarchive }
+                            )
+                        } else {
+                            DropdownMenuItem(text = { Text("归档会话") }, onClick = { menuOpen = false; dialog = SessionDialog.Archive })
+                        }
                         DropdownMenuItem(text = { Text("彻底删除", color = Danger) }, onClick = { menuOpen = false; dialog = SessionDialog.Delete })
+                    }
+                }
+            }
+
+            if (state.activeArchived) {
+                // 归档后任务不会立刻关掉：留在这里，用户可以从菜单直接取消归档。
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(color = SurfaceRaised, shape = RoundedCornerShape(12.dp)) {
+                        Text(
+                            "这个任务已归档，电脑和手机的列表里都看不见它。点右上角菜单「取消归档」可以放回去。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Amber,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        )
                     }
                 }
             }
@@ -501,7 +527,7 @@ fun SessionScreen(
         SessionDialog.Archive -> AlertDialog(
             onDismissRequest = { dialog = null },
             title = { Text("归档这个任务？") },
-            text = { Text("归档后手机和电脑的任务列表都不再显示它，会话日志保留。需要时可以在电脑上取消归档，回到原来的位置。") },
+            text = { Text("归档后手机和电脑的任务列表都不再显示它，会话日志保留。想找回来时，在电脑上面板或手机当前任务菜单里取消归档都会回到原来的位置。") },
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
@@ -512,6 +538,23 @@ fun SessionScreen(
                 }) { Text("归档") }
             },
             dismissButton = { TextButton(onClick = { dialog = null }) { Text("取消") } },
+            containerColor = SurfaceRaised,
+            titleContentColor = TextPrimary,
+            textContentColor = TextMuted
+        )
+        SessionDialog.Unarchive -> AlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("取消归档这个任务？") },
+            text = { Text("取消归档后，它会回到工作区原来的位置，电脑和手机的任务列表都会重新显示它。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        repository.unarchiveActiveSession()
+                        dialog = null
+                    }
+                }) { Text("取消归档") }
+            },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("关闭") } },
             containerColor = SurfaceRaised,
             titleContentColor = TextPrimary,
             textContentColor = TextMuted

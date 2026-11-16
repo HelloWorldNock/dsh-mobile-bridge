@@ -15,9 +15,10 @@ android/app/build/
 android/app/.cxx/
 android/local.properties
 
-# 测试残留与依赖
+# 测试残留与依赖（只有仓库根部的临时 test/ 目录被忽略；
+# host/test 与 android/app/src/test 是正式测试，必须入库）
 testhome/
-test/
+/test/
 node_modules/
 *.log
 *.err.log

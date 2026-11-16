@@ -1,5 +1,5 @@
 import os from 'node:os'
-import { loadState, saveState, defaultStatePath } from './state.js'
+import { loadState, saveState, defaultStatePath, TIMEOUT_DEFAULTS } from './state.js'
 import { createAuth } from './auth.js'
 import { createBroadcaster, createSessionHub } from './events.js'
 import { createApprovals } from './approvals.js'
@@ -15,16 +15,16 @@ import { createLogSink, wrapLogger, startLogTee } from './logs.js'
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.8.8'
+const VERSION = '0.8.9'
+// 超时默认值不在这里重复定义——见 state.js 的 TIMEOUT_DEFAULTS（120/120/180 s），
+// 配置里传了非法值时回落到同一组数，避免「面板显示 120 s、实际按 30 s 跑」这类偏差。
 const DEFAULTS = {
   port: 48123,
   discoveryPort: 48124,
   bindHost: '0.0.0.0',
   discovery: true,
   phoneFirst: true,
-  approvalTimeoutMs: 30_000,
-  questionTimeoutMs: 60_000,
-  planReviewTimeoutMs: 120_000
+  ...TIMEOUT_DEFAULTS
 }
 
 function positivePort(value, fallback) {
@@ -181,7 +181,8 @@ export function apply(ctx, config) {
     syncDiscovery()
     logger.info?.(`[mobile-bridge] listening on http://${cfg.bindHost}:${actualPort} (discovery udp/${cfg.discoveryPort})`)
     logger.info?.(`[mobile-bridge] v${VERSION} · ${process.platform}/${process.arch} · node ${process.version} · 日志 ${logs.path ?? '(未落盘)'}`)
-    logger.info?.(`[mobile-bridge] open http://127.0.0.1:${actualPort}/ on this PC to pair a phone`)
+    // 网页控制端已经移除：根路径只回 404 提示。配对入口在 DSH 侧栏的「手机远控」面板。
+    logger.info?.(`[mobile-bridge] 配对入口：在 DSH 侧栏点「手机远控」打开面板，用面板上的 6 位配对码配对新手机`)
   }
 
   const ready = start().catch((error) => {
