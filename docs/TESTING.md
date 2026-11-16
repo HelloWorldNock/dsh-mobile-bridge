@@ -47,7 +47,8 @@ ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；纯 ASC
 | G02 | Host 测试可复现 | `cd host && node --test` | 每次发版必过 |
 | G03 | Host 语法检查 | `cd host && node scripts/check.mjs` | 每次发版必过 |
 | G04 | Android 构建 | `cd android && .\gradlew.bat :app:assembleDebug`（现按 ABI 拆成 arm64-v8a / x86_64 / universal 三个包） | 每次发版必过 |
-| G05 | 签名验证 | `apksigner verify --print-certs <apk>`；release 需要有 `android/keystore.properties`。当前 debug 包验到 `CN=Android Debug`，release 签名链路已接好但密钥不在仓库 | R26 已接好链路 |
+| G04b | Release 构建（需密钥） | 先 `powershell -File tools/make-keystore.ps1` 生成密钥与 `android/keystore.properties`，再 `:app:assembleRelease` | 发 release 包时 |
+| G05 | 签名验证 | `powershell -File tools/verify-apk-signature.ps1`（默认校验 `dist/` 里最新的 debug 包；签名方案、证书 DN、SHA-256 一并打印，未签名则退出码 1）。发布包加 `-ExpectCommonName "CN=…"` 断言用自己的证书 | ✅ 可执行 |
 | G06 | 凭据保护 | 真机读 `shared_prefs` 无明文 | R14 已完成代码，真机待验 |
 | G07 | 鉴权审计 | 路由鉴权矩阵测试 | ✅ |
 | G08 | DSH 兼容性 | 面板顶部无兼容性横幅 / `/api/setup/state.compatibility.ok` | ✅ |

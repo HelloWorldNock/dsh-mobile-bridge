@@ -82,8 +82,19 @@ keyPassword=…
 - 文件存在 → `assembleRelease` 用 `signingConfigs.release` 签名；
 - 文件不存在 → 仍产出未签名 release 包（用来验证拆分体积），`apksigner verify` 会报
   `Missing META-INF/MANIFEST.MF`，属于预期；
-- 自建密钥：`keytool -genkeypair -keystore release.jks -alias <alias> -keyalg RSA -keysize 2048 -validity 10000`，
-  密钥与口令自己保管（丢了就无法给老用户推送同一签名的升级）。
+- 自建密钥（一条命令）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/make-keystore.ps1
+# → .toolchain\keystore\release.jks + android\keystore.properties（两者都已 gitignore）
+```
+
+  脚本会生成随机 28 位口令、写好 properties、并提示下一步；已存在密钥时拒绝覆盖（除非 `-Force`）。
+  密钥与口令自己离线保管——丢了就再也发不出「同签名」的升级包。
+
+- 签名门禁：`powershell -File tools/verify-apk-signature.ps1`（默认校验 `dist/` 里最新 debug 包，
+  打印签名方案 / 证书 DN / SHA-256，未签名退出码 1）。发 release 时用
+  `-Apk <release.apk> -ExpectCommonName "CN=…"` 断言证书是自己那把。
 
 ABI 拆分（`splits { abi { include("arm64-v8a", "x86_64"); isUniversalApk = true } }`）实测：
 

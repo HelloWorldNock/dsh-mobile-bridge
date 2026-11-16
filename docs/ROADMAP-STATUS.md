@@ -43,14 +43,14 @@
 | R23 | `adapters/dsh/` 落地 | ✅ | 会话/工作区适配层，`server.js` 里 0 处直接摸宿主接口 |
 | R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、22 条路由、形状、12 类 SSE、60 个错误码 |
 | R25 | 文档单一事实源 | ✅ | [`API.md`](API.md) / [`INSTALL.md`](INSTALL.md) / [`TESTING.md`](TESTING.md) / [`SECURITY.md`](SECURITY.md) + README 文档地图 |
-| R26 | 签名 + ABI 拆分 | ◐ | 拆分已生效（单包 65 → 34 MB）；签名链路已接好，**私钥需自备**（环境禁止创建 `.jks`） |
+| R26 | 签名 + ABI 拆分 | ◐（链路齐、密钥待你生成） | 拆分已生效（单包 65 → 34 MB）；签名链路 + `tools/make-keystore.ps1`（一条命令生成密钥与 properties）+ `tools/verify-apk-signature.ps1`（G05 门禁，已在 debug 包上证到 v1–v4 与 `CN=Android Debug`）。**私钥仍需你本地生成**：本次执行环境禁止创建 `.jks` |
 | R27 | always-allow / 模型切换 / fork / 子代理控制 | ⏸ | 路线本身标为低优先，等范围决策 |
 
 ## 还没做完的三件事
 
 1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层，剩下的 A5/A7/A9–A12/A15/A18–A20 需要一台真机
    （审批点按、图片全屏、断网/切网、锁屏通知、NAT 发现、彻底删除）。
-2. **R26 发布私钥**：`keytool -genkeypair` 需由仓库主人执行并保管（`.jks` 被运行环境的安全策略拦下）。
+2. **R26 发布私钥**：跑一次 `tools/make-keystore.ps1` 即可（密钥与口令由它生成并写进已 gitignore 的位置）；我这边的执行环境禁止创建 `.jks`，所以只能把链路和门禁做到「一条命令可用」。
 3. **R22 剩余**：`PanelBody` 的区块切分（渲染冒烟测试已就位，可以安全推进）。
 
 ## 当前质量基线（0.9.8）
