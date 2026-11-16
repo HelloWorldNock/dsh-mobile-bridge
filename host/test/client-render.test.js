@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { BridgeSettingsCard, DevicesCard, LogCard, UpdateCard } from '../client-src/components.mjs'
+import { BridgeSettingsCard, DevicesCard, GroupCard, LogCard, UpdateCard } from '../client-src/components.mjs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -400,5 +400,92 @@ test('BridgeSettingsCard patches only the touched field, in the right units', ()
     assert.match(flatten(busyCard).join(' '), /保存中/)
   } finally {
     delete globalThis.h
+  }
+})
+
+
+test('GroupCard renders both states and wires the five actions', () => {
+  globalThis.h = (type, props, ...children) => ({ type, props: props ?? {}, children })
+  globalThis.formatCode = (code) => String(code).replace(/(\d{3})(\d{3})/, '$1  $2')
+  try {
+    const calls = []
+    const base = {
+      busy: '',
+      error: '',
+      saved: '',
+      url: '',
+      code: '',
+      onUrlChange: (v) => calls.push(['url', v]),
+      onCodeChange: (v) => calls.push(['code', v]),
+      onCreate: () => calls.push(['create']),
+      onLeave: () => calls.push(['leave']),
+      onInvite: () => calls.push(['invite']),
+      onForget: (peer) => calls.push(['forget', peer.deviceId]),
+      onJoin: () => calls.push(['join'])
+    }
+    const find = (node, predicate, out = []) => {
+      if (node === null || typeof node !== 'object') return out
+      if (Array.isArray(node)) { for (const c of node) find(c, predicate, out); return out }
+      if (predicate(node)) out.push(node)
+      for (const child of node.children ?? []) find(child, predicate, out)
+      return out
+    }
+    const text = (node) => flatten(node).join(' ')
+
+    // 未加入：创建组 + 加入表单
+    const out = GroupCard({ ...base, group: { group: null, peers: [], invite: null } })
+    assert.match(text(out), /还没有绑定组/)
+    assert.match(text(out), /加入别人的组/)
+    assert.equal(find(out, (n) => n.type === 'button').length, 2)
+    const inputs = find(out, (n) => n.type === 'input')
+    inputs[0].props.onChange({ target: { value: 'http://10.0.0.2:48123' } })
+    inputs[1].props.onChange({ target: { value: '123456' } })
+    find(out, (n) => n.type === 'button')[0].props.onClick()
+    find(out, (n) => n.type === 'button')[1].props.onClick()
+    assert.deepEqual(calls, [['url', 'http://10.0.0.2:48123'], ['code', '123456'], ['create'], ['join']])
+
+    // 已加入：组名、邀请码、组内 PC、移出/退出/换一个
+    calls.length = 0
+    const joined = GroupCard({
+      ...base,
+      group: {
+        group: { id: 'grp1', name: '设计组' },
+        peers: [
+          { deviceId: 'HOSTB', name: 'PC-B', status: 'online', baseUrl: 'http://10.0.0.3:48123' },
+          { deviceId: 'HOSTC', status: 'offline', baseUrl: 'http://10.0.0.4:48123' }
+        ],
+        invite: { code: '123456' }
+      }
+    })
+    const joinedText = text(joined)
+    assert.match(joinedText, /设计组/)
+    assert.match(joinedText, /grp1 · 2 台协作 PC/)
+    assert.match(joinedText, /邀请码 123  456/)
+    assert.match(joinedText, /PC-B/)
+    assert.match(joinedText, /在线/)
+    assert.match(joinedText, /离线/)
+
+    const buttons = find(joined, (n) => n.type === 'button')
+    // 退出 / 换一个 / 移出 ×2
+    assert.equal(buttons.length, 4)
+    buttons[0].props.onClick()
+    buttons[1].props.onClick()
+    buttons[3].props.onClick()
+    assert.deepEqual(calls, [['leave'], ['invite'], ['forget', 'HOSTC']])
+
+    // 错误与提示
+    const withMessages = GroupCard({ ...base, group: null, error: '加入失败：地址不可达', saved: '已加入绑定组' })
+    const messageText = text(withMessages)
+    assert.match(messageText, /加入失败/)
+    assert.match(messageText, /已加入绑定组/)
+
+    // 忙碌：按钮禁用且文案变化
+    const busyCard = GroupCard({ ...base, group: null, busy: 'group-join' })
+    const busyButton = find(busyCard, (n) => n.type === 'button')[1]
+    assert.equal(busyButton.props.disabled, true)
+    assert.match(text(busyCard), /加入中/)
+  } finally {
+    delete globalThis.h
+    delete globalThis.formatCode
   }
 })

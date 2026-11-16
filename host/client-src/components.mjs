@@ -282,3 +282,106 @@ export function BridgeSettingsCard({ workspaces, form, error, busy, saved, onPat
     ),
   )
 }
+
+/**
+ * PC 绑定组卡片（R22 第九刀）。
+ *
+ * 只管画：组状态、邀请码、组内 PC 列表、加入表单，以及 5 个按钮。
+ * 建组/退出/生成邀请码/移出/加入的副作用（post、confirm、地址与邀请码校验）都在
+ * `PanelBody` 的回调里，组件不碰网络、不读全局。
+ */
+export function GroupCard({ group, busy, error, saved, url, code, onUrlChange, onCodeChange, onCreate, onLeave, onInvite, onForget, onJoin }) {
+  const groupState = group || { group: null, peers: [], invite: null }
+  const peers = Array.isArray(groupState.peers) ? groupState.peers : []
+  const invite = groupState.invite || null
+  const joined = Boolean(groupState.group)
+
+  return h(
+    "div",
+    { className: "dmb-card" },
+    h("div", { className: "dmb-label", style: { marginBottom: 8 } }, "PC 绑定组"),
+    error !== "" ? h("div", { className: "dmb-alert", style: { marginBottom: 10 } }, error) : null,
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h(
+        "div",
+        { className: "grow" },
+        h("div", { className: "name" }, joined ? groupState.group.name || "绑定组" : "还没有绑定组"),
+        h(
+          "div",
+          { className: "hint" },
+          joined
+            ? `${groupState.group.id} · ${peers.length} 台协作 PC`
+            : "把几台电脑绑到同一个组里，Agent 之间就能互相派活、交换产物文件。",
+        ),
+      ),
+      joined
+        ? h("button", { className: "dmb-btn danger", disabled: busy !== "", onClick: onLeave }, busy === "group-leave" ? "退出中…" : "退出")
+        : h("button", { className: "dmb-btn primary", disabled: busy !== "", onClick: onCreate }, busy === "group-create" ? "创建中…" : "创建组"),
+    ),
+    joined
+      ? h(
+          "div",
+          { className: "dmb-setting" },
+          h(
+            "div",
+            { className: "grow" },
+            h("div", { className: "name" }, invite ? `邀请码 ${formatCode(invite.code)}` : "邀请码"),
+            h(
+              "div",
+              { className: "hint" },
+              invite
+                ? "在另一台 PC 的面板里选「加入绑定组」，填这台 PC 的地址和这个 6 位码。"
+                : "生成一个一次性邀请码，让另一台 PC 加入这个组。",
+            ),
+          ),
+          h("button", { className: "dmb-btn", disabled: busy !== "", onClick: onInvite }, busy === "group-invite" ? "生成中…" : invite ? "换一个" : "生成邀请码"),
+        )
+      : null,
+    joined
+      ? h(
+          "div",
+          null,
+          h("div", { className: "dmb-label", style: { marginTop: 14, marginBottom: 8 } }, "组内 PC"),
+          h(
+            "div",
+            { className: "dmb-devices" },
+            peers.length === 0
+              ? h("div", { className: "dmb-empty" }, "还没有其他 PC 加入")
+              : peers.map((peer) =>
+                  h(
+                    "div",
+                    { className: "dmb-device", key: peer.deviceId },
+                    h("span", { className: "dmb-dot", style: { color: peer.status === "online" ? "#16A34A" : "#94A3B8" } }),
+                    h(
+                      "div",
+                      { className: "grow" },
+                      h("div", { className: "name" }, peer.name || peer.deviceId),
+                      h("div", { className: "dmb-peer-url" }, `${peer.status === "online" ? "在线" : "离线"} · ${peer.baseUrl}`),
+                    ),
+                    h("button", { className: "dmb-btn", disabled: busy !== "", onClick: () => onForget(peer) }, "移出"),
+                  ),
+                ),
+          ),
+        )
+      : h(
+          "div",
+          { className: "dmb-setting" },
+          h(
+            "div",
+            { className: "grow" },
+            h("div", { className: "name" }, "加入别人的组"),
+            h("div", { className: "hint" }, "填对方 PC 的地址（端口 48123，可以省略 http://）和它面板上显示的 6 位邀请码。"),
+            h(
+              "div",
+              { className: "dmb-join" },
+              h("input", { className: "dmb-input", placeholder: "http://192.168.1.10:48123", value: url, onChange: (event) => onUrlChange(event.target.value) }),
+              h("input", { className: "dmb-input", placeholder: "6 位邀请码", value: code, onChange: (event) => onCodeChange(event.target.value) }),
+            ),
+          ),
+          h("button", { className: "dmb-btn primary", disabled: busy !== "", onClick: onJoin }, busy === "group-join" ? "加入中…" : "加入"),
+        ),
+    saved ? h("div", { className: "dmb-saved", style: { marginTop: 10 } }, saved) : null,
+  )
+}
