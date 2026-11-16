@@ -41,7 +41,7 @@
 | R21 | 拆 `server.js` | ✅ | 1,438 → 738 行；`routes/{setup,workspaces,connections,sessions}.js` + `services/{prompt,format}.js` + `adapters/dsh/` |
 | R22 | 拆 `client.js` | ✅ | `client-src/{styles,helpers,components}.mjs` + 生成器 `--check` + 渲染冒烟测试（`test/client-render.test.js`）+ 九个区块全部组件化（`DevicesCard` / `LogCard` / `UpdateCard` / `BridgeSettingsCard` / `GroupCard` / `TailscaleCard` 等），`panel.mjs` 1,160 → **626 行**；`client-src/` + 生成器 + 渲染测试（`client-bundle` / `client-render` / `client-tailscale`） |
 | R23 | `adapters/dsh/` 落地 | ✅ | 会话/工作区适配层，`server.js` 里 0 处直接摸宿主接口 |
-| R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、路由表（含每个 body 的字段）、形状、12 类 SSE、60 个错误码；**G13 守卫**（`tools/check-api-doc.mjs` + `host/test/api-doc.test.js`）保证「代码里读到的字段一定在文档里」 |
+| R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、路由表（含每个 body 的字段）、形状、12 类 SSE、60 个错误码；**G13/G14 守卫**保证「代码里读到的字段一定在文档里」且「代码里的路由与文档路由表双向一致」（`tools/check-api-doc.mjs` / `check-api-routes.mjs` + 两个测试） |
 | R25 | 文档单一事实源 | ✅ | [`API.md`](API.md) / [`INSTALL.md`](INSTALL.md) / [`TESTING.md`](TESTING.md) / [`SECURITY.md`](SECURITY.md) + README 文档地图 |
 | R26 | 签名 + ABI 拆分 | ◐（链路齐、密钥待你生成） | 拆分已生效（单包 65 → 34 MB）；签名链路 + `tools/make-keystore.ps1`（一条命令生成密钥与 properties）+ `tools/verify-apk-signature.ps1`（G05 门禁，已在 debug 包上证到 v1–v4 与 `CN=Android Debug`）。**私钥仍需你本地生成**：本次执行环境禁止创建 `.jks` |
 | R27 | always-allow / 模型切换 / fork / 子代理控制 | ⏸ | 路线本身标为低优先，等范围决策 |
@@ -109,7 +109,7 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 ## 当前质量基线（0.9.8）
 
 ```
-host      : 27 模块 / 182 例（181 过 + 1 集成用例默认跳过）
+host      : 27 模块 / 183 例（182 过 + 1 集成用例默认跳过）
 android   : 55 例
 门禁      : verify-package PASS（38 文件 / 26 个 lib/** 同哈希，版本三处一致）
 构建      : assembleDebug / assembleRelease 均成功（versionCode 36，ABI 三包）

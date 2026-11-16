@@ -33,6 +33,7 @@
 | GET | `/api/discovery` | 与 UDP 发现应答同内容，供 NAT 中继查询 |
 | POST | `/api/pair` | `{code, installId?, deviceName?, model?, appVersion?}` → `{token, deviceId, ...}` |
 | POST | `/api/group/join` | `{code, baseUrl, deviceId, name?, version?, collabRoot?, collabWorkspaceId?}` → 组密钥 |
+| POST | `/api/group/hello` | 组内握手：`{code, baseUrl, deviceId, name?, version?, selfBaseUrl?}`；只认组密钥，**不认设备 token**（新 PC 拿到密钥前的唯一入口） → 组密钥 + 成员表 |
 
 ### 3.2 面板（loopback + CSRF）
 

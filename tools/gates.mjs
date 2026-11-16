@@ -112,6 +112,17 @@ if (shouldRun('G13')) {
   )
 }
 
+// G14 路由级漂移
+if (shouldRun('G14')) {
+  const r = runCommand(process.execPath, [join(REPO, 'tools/check-api-routes.mjs')])
+  record(
+    'G14',
+    '路由级契约漂移',
+    r.status === 0 ? 'pass' : 'fail',
+    r.status === 0 ? summarize(r.stdout, /✔ 路由级契约双向一致|代码侧：.*/) : '有路由没登记或文档里的路由代码接不住'
+  )
+}
+
 // G12 发布信息一致性（版本三处 + Note 存在 + contrib 指向当前版本）
 if (shouldRun('G12')) {
   try {

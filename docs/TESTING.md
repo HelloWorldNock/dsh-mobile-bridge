@@ -58,7 +58,8 @@ ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；纯 ASC
 | G10 | 网络切换 | LAN ↔ Tailscale ↔ 断网恢复 | 待跑 |
 | G11 | 后台运行 | 通知 / 后台恢复 / 进程回收 | 待跑 |
 | G12 | 发布信息 | 版本三处一致 + Note + contrib | ✅ |
-| G13 | 契约漂移 | `node tools/check-api-doc.mjs`：路由里读到的每个 `body.<字段>` 必须在 `docs/API.md` 里出现（同时是 `host/test/api-doc.test.js`） | ✅ 每条测试都跑 |
+| G13 | 契约漂移（字段级） | `node tools/check-api-doc.mjs`：路由里读到的每个 `body.<字段>` 必须在 `docs/API.md` 里出现（同时是 `host/test/api-doc.test.js`） | ✅ 每条测试都跑 |
+| G14 | 契约漂移（路由级） | `node tools/check-api-routes.mjs`：代码里的字面量/前缀/正则路由与文档路由表**双向**比对（同时是 `host/test/api-routes.test.js`） | ✅ 每条测试都跑 |
 
 ### 2.1 包一致性门禁做什么
 
