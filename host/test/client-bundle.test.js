@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fmtTime, formatCode, parseGroupUrl } from '../client-src/helpers.mjs'
+import { ErrorPanel, PhoneIcon, Status } from '../client-src/components.mjs'
 
 /**
  * 面板（R22）：`lib/client.js` 是由 `client-src/` 片段生成的单文件 bundle，
@@ -136,4 +137,60 @@ test('the bundle loads like the DSH loader does and registers both slots', () =>
     ['dsh-mobile-bridge', 'dsh-mobile-bridge-sidebar']
   )
   for (const entry of registrations) assert.equal(entry.hasComponent, true)
+})
+
+/**
+ * 叶子组件（R22 第二刀）：它们只依赖 `h`，所以给一个假的 createElement 就能断言元素树。
+ * 片段本身没有 import `h`——运行时由 bundle 的 factory 作用域提供。
+ */
+test('leaf components only need h and their props', () => {
+  const created = []
+  globalThis.h = (type, props, ...children) => {
+    const node = { type, props: props ?? {}, children }
+    created.push(node)
+    return node
+  }
+  try {
+    const icon = PhoneIcon()
+    assert.equal(icon.type, 'svg')
+    assert.equal(icon.props.viewBox, '0 0 24 24')
+    assert.equal(icon.children.length, 2)
+
+    const ok = Status({ ok: true, text: '桥接运行中' })
+    assert.equal(ok.props.className, 'dmb-status')
+    // 结构是「状态点 + 文案」
+    assert.equal(ok.children[0].type, 'span')
+    assert.equal(ok.children[0].props.className, 'dmb-dot')
+    assert.equal(ok.children[1], '桥接运行中')
+
+    const bad = Status({ ok: false, text: '未运行' })
+    assert.equal(bad.props.className, 'dmb-status bad')
+
+    let closed = 0
+    const panel = ErrorPanel({ error: new Error('boom'), onClose: () => { closed += 1 } })
+    assert.equal(panel.type, 'div')
+    assert.equal(panel.children.length, 3)
+    const button = panel.children[2]
+    assert.equal(button.type, 'button')
+    button.props.onClick()
+    assert.equal(closed, 1)
+  } finally {
+    delete globalThis.h
+  }
+})
+
+test('the bundle still carries every panel entry point', () => {
+  const code = readFileSync(BUNDLE, 'utf8')
+  for (const name of [
+    'function PhoneIcon',
+    'function Status',
+    'function ErrorPanel',
+    'function compatNotice',
+    'function PanelBody',
+    'function SidebarAction',
+    'function SettingsCard',
+    'function apply'
+  ]) {
+    assert.ok(code.includes(name), `bundle 里缺少 ${name}`)
+  }
 })

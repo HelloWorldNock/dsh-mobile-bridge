@@ -6,7 +6,7 @@
 
 | 层 | 命令 | 现状 | 覆盖 |
 |---|---|---|---|
-| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **164 例（163 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
+| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **167 例（166 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
 | Android 数据层 | `powershell -File tools/test-android.ps1` | **45 例** | 配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移、连接路由决策、会话与时间线折叠 |
 | 真实宿主契约 | `cd host && $env:DSH_BRIDGE_INTEGRATION='1'; node --test test/integration/prompt.test.js` | 1 例（默认跳过） | 对运行中的桥接跑真 prompt 并核对历史落盘 |
 
@@ -29,7 +29,7 @@
 | `adapters.test.js` | 宿主形状差异（`{items}` 与裸数组、同步/异步 `resolveByPath`、归档集合读不到） |
 | `compatibility-check.test.js` | 探针的必需/可选分级、签名漂移、空 ctx |
 | `services.test.js` | 图片数量/类型/base64/大小上限、标题、时区、文件名、路径比较 |
-| `routes-workspaces.test.js` / `routes-setup.test.js` | 拆出来的路由族（不经过 HTTP） |`n| `client-bundle.test.js` | 面板：纯函数边界、`lib/client.js` 未过期（`build-client --check`）、假 loader 载入后 `apply` 注册两个插槽 |`n| `routes-sessions.test.js`（无独立模块测试） | 会话路由族由 `server.test.js` 的 HTTP 用例覆盖（鉴权矩阵、动作、历史、图片、待办、SSE） |`n| `routes-connections.test.js` | 绑定组与协作路由族：join/hello 在身份解析之前、协作文件不出白名单、`requireIdentity` 只在需要的路径上调用 |
+| `routes-workspaces.test.js` / `routes-setup.test.js` | 拆出来的路由族（不经过 HTTP） |`n| `client-bundle.test.js` | 面板：纯函数边界、叶子组件元素树、8 个入口函数仍在 bundle 里、`lib/client.js` 未过期（`build-client --check`）、假 loader 载入后 `apply` 注册两个插槽 |`n| `routes-sessions.test.js`（无独立模块测试） | 会话路由族由 `server.test.js` 的 HTTP 用例覆盖（鉴权矩阵、动作、历史、图片、待办、SSE） |`n| `routes-connections.test.js` | 绑定组与协作路由族：join/hello 在身份解析之前、协作文件不出白名单、`requireIdentity` 只在需要的路径上调用 |
 
 ### 1.2 Android 侧细节
 

@@ -22,7 +22,8 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const HOST = join(HERE, '..', 'host')
 const SRC = join(HOST, 'client-src')
 const OUT = join(HOST, 'lib', 'client.js')
-const PLACEHOLDER = '/* __CLIENT_HELPERS__ */'
+const HELPERS_PLACEHOLDER = '/* __CLIENT_HELPERS__ */'
+const COMPONENTS_PLACEHOLDER = '/* __CLIENT_COMPONENTS__ */'
 
 /**
  * 内联 helpers 片段：
@@ -42,14 +43,17 @@ function inlineHelpers(source) {
 }
 
 export async function build({ check = false } = {}) {
-  const [panel, helpers] = await Promise.all([
+  const [panel, helpers, components] = await Promise.all([
     readFile(join(SRC, 'panel.mjs'), 'utf8'),
-    readFile(join(SRC, 'helpers.mjs'), 'utf8')
+    readFile(join(SRC, 'helpers.mjs'), 'utf8'),
+    readFile(join(SRC, 'components.mjs'), 'utf8')
   ])
-  if (!panel.includes(PLACEHOLDER)) {
-    throw new Error(`client-src/panel.mjs 里找不到占位符 ${PLACEHOLDER}`)
+  for (const placeholder of [HELPERS_PLACEHOLDER, COMPONENTS_PLACEHOLDER]) {
+    if (!panel.includes(placeholder)) throw new Error(`client-src/panel.mjs 里找不到占位符 ${placeholder}`)
   }
-  const bundle = panel.replace(PLACEHOLDER, inlineHelpers(helpers))
+  const bundle = panel
+    .replace(HELPERS_PLACEHOLDER, inlineHelpers(helpers))
+    .replace(COMPONENTS_PLACEHOLDER, inlineHelpers(components))
   if (check) {
     const current = await readFile(OUT, 'utf8').catch(() => '')
     if (current !== bundle) {

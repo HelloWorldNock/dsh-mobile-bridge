@@ -139,23 +139,8 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
 
 /* __CLIENT_HELPERS__ */
 
-    function PhoneIcon() {
-      return h(
-        "svg",
-        { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", "aria-hidden": "true" },
-        h("rect", { x: 6, y: 2.5, width: 12, height: 19, rx: 2.6, stroke: "currentColor", strokeWidth: 1.7 }),
-        h("path", { d: "M10.5 18.5h3", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" }),
-      )
-    }
+/* __CLIENT_COMPONENTS__ */
 
-    function Status({ ok, text }) {
-      return h(
-        "span",
-        { className: "dmb-status" + (ok ? "" : " bad") },
-        h("span", { className: "dmb-dot" }),
-        text,
-      )
-    }
 
     /**
      * 宿主兼容性横幅。探针在 DSH 启动时跑一次，结果随 /api/setup/state 下发：
@@ -1077,15 +1062,6 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       }
     }
 
-    function ErrorPanel({ error, onClose }) {
-      return h(
-        "div",
-        { className: "dmb-panel", style: { padding: 22 } },
-        h("div", { className: "dmb-title" }, "手机远控面板加载出错"),
-        h("div", { className: "dmb-alert", style: { marginTop: 12 } }, String(error?.message || error)),
-        h("button", { className: "dmb-btn", style: { marginTop: 14 }, onClick: onClose }, "关闭"),
-      )
-    }
 
     function SidebarAction() {
       const [open, setOpen] = useState(false)

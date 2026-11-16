@@ -185,6 +185,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       )
     }
 
+    /** 桥接在线状态点 + 文案。 */
     function Status({ ok, text }) {
       return h(
         "span",
@@ -193,6 +194,18 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
         text,
       )
     }
+
+    /** 面板整体崩溃时的兜底页：只显示错误与关闭按钮。 */
+    function ErrorPanel({ error, onClose }) {
+      return h(
+        "div",
+        { className: "dmb-panel", style: { padding: 22 } },
+        h("div", { className: "dmb-title" }, "手机远控面板加载出错"),
+        h("div", { className: "dmb-alert", style: { marginTop: 12 } }, String(error?.message || error)),
+        h("button", { className: "dmb-btn", style: { marginTop: 14 }, onClick: onClose }, "关闭"),
+      )
+    }
+
 
     /**
      * 宿主兼容性横幅。探针在 DSH 启动时跑一次，结果随 /api/setup/state 下发：
@@ -1114,15 +1127,6 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       }
     }
 
-    function ErrorPanel({ error, onClose }) {
-      return h(
-        "div",
-        { className: "dmb-panel", style: { padding: 22 } },
-        h("div", { className: "dmb-title" }, "手机远控面板加载出错"),
-        h("div", { className: "dmb-alert", style: { marginTop: 12 } }, String(error?.message || error)),
-        h("button", { className: "dmb-btn", style: { marginTop: 14 }, onClick: onClose }, "关闭"),
-      )
-    }
 
     function SidebarAction() {
       const [open, setOpen] = useState(false)
