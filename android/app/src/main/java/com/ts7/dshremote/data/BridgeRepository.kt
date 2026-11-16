@@ -1,4 +1,4 @@
-package com.ts7.dshremote.data
+﻿package com.ts7.dshremote.data
 
 import android.content.Context
 import android.net.ConnectivityManager
@@ -45,8 +45,7 @@ class BridgeRepository(
         /** 打开会话后顺手刷列表的新鲜度阈值，避免每次点开会话都多跑两个请求。 */
         private const val SESSION_REFRESH_FRESH_MS = 3_000L
 
-        /** 连上 tailnet 后隔一会儿再探局域网：太早会和首次连接的探测抢同一条链路。 */
-        private const val LAN_PROBE_DELAY_MS = 1_500L
+
     }
 
     private val appContext = context.applicationContext
@@ -246,10 +245,8 @@ class BridgeRepository(
         if (runtime.profile.token.isBlank()) return
         if (runtime.connection == ConnectionState.Disconnected) return
         val best = pickReachable(runtime, preferLan = true) ?: return
-        if (normalizeBaseUrl(best.url) != normalizeBaseUrl(runtime.profile.baseUrl) ||
-            runtime.connection != ConnectionState.Connected
-        ) {
-            if (best.kind == Endpoints.LAN) promoteLan(runtime, best)
+        if (ConnectionRouter.shouldSwitch(runtime.profile.baseUrl, best, runtime.connection == ConnectionState.Connected)) {
+            if (ConnectionRouter.shouldPromoteLan(best, runtime.profile.baseUrl)) promoteLan(runtime, best)
             restart(runtime)
         }
     }
@@ -283,9 +280,9 @@ class BridgeRepository(
         if (lan.isEmpty()) return
         runtime.lanProbeJob?.cancel()
         runtime.lanProbeJob = scope.launch {
-            delay(LAN_PROBE_DELAY_MS)
+            delay(ConnectionRouter.LAN_PROBE_DELAY_MS)
             // 首次连接后面还跟着一轮刷新，重启会把它们打断；等这轮跑完再探。
-            if (runtime.connectJob?.isActive == true) delay(LAN_PROBE_DELAY_MS)
+            if (runtime.connectJob?.isActive == true) delay(ConnectionRouter.LAN_PROBE_DELAY_MS)
             if (runtimes[runtime.profile.id] !== runtime) return@launch
             if (runtime.connection != ConnectionState.Connected) return@launch
             if (runtime.endpointKind == Endpoints.LAN) return@launch
@@ -303,7 +300,7 @@ class BridgeRepository(
         }
     }
 
-    private fun probeTimeout(kind: String): Long = if (kind == Endpoints.TAILSCALE) 3_500L else 1_800L
+    private fun probeTimeout(kind: String): Long = ConnectionRouter.probeTimeoutMs(kind)
 
     /**
      * Embedded Tailscale is a userspace node: tailnet targets are reached
@@ -359,16 +356,12 @@ class BridgeRepository(
         }
     }
 
-    private fun matches(runtime: Runtime, info: BridgeInfo): Boolean {
-        val expected = runtime.profile.deviceId?.takeIf { it.isNotBlank() } ?: return true
-        val reported = info.bridge?.deviceId?.takeIf { it.isNotBlank() } ?: return true
-        return expected == reported
-    }
+    private fun matches(runtime: Runtime, info: BridgeInfo): Boolean =
+        ConnectionRouter.deviceMatches(runtime.profile.deviceId, info.bridge?.deviceId)
 
     private suspend fun pickReachable(runtime: Runtime, preferLan: Boolean = false): BridgeEndpoint? {
         val token = runtime.profile.token
-        val order = runtime.profile.candidates
-        for (endpoint in if (preferLan) Endpoints.preferLan(order) else order) {
+        for (endpoint in ConnectionRouter.probeOrder(runtime.profile.candidates, preferLan)) {
             try {
                 val info = clientFor(endpoint, token, probeTimeout(endpoint.kind)).info()
                 if (matches(runtime, info)) return endpoint
