@@ -109,7 +109,7 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 ## 当前质量基线（0.9.8）
 
 ```
-host      : 27 模块 / 183 例（182 过 + 1 集成用例默认跳过）
+host      : 27 模块 / 185 例（184 过 + 1 集成用例默认跳过）
 android   : 55 例
 门禁      : verify-package PASS（38 文件 / 26 个 lib/** 同哈希，版本三处一致）
 构建      : assembleDebug / assembleRelease 均成功（versionCode 36，ABI 三包）

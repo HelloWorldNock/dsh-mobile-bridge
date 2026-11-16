@@ -123,6 +123,17 @@ if (shouldRun('G14')) {
   )
 }
 
+// G15 凭据契约
+if (shouldRun('G15')) {
+  const r = runCommand(process.execPath, [join(REPO, 'tools/check-security-doc.mjs')])
+  record(
+    'G15',
+    '凭据契约漂移',
+    r.status === 0 ? 'pass' : 'fail',
+    r.status === 0 ? summarize(r.stdout, /✔ 凭据契约一致.*|代码里实现了.*/) : '凭据前缀与 SECURITY.md 不一致'
+  )
+}
+
 // G12 发布信息一致性（版本三处 + Note 存在 + contrib 指向当前版本）
 if (shouldRun('G12')) {
   try {

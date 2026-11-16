@@ -36,6 +36,10 @@ jobs:
         working-directory: .
         run: node tools/check-api-routes.mjs
 
+      - name: api contract drift (credentials)
+        working-directory: .
+        run: node tools/check-security-doc.mjs
+
       # 面板 bundle 由 client-src/ 片段生成；源码改了忘记重新生成会被这一步拦下。
       - name: client bundle freshness
         working-directory: .
