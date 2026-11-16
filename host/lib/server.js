@@ -23,6 +23,7 @@ import {
 import { clampLogLines, fileStamp, samePath, toEpochMillis } from './services/format.js'
 import { createWorkspaceRoutes } from './routes/workspaces.js'
 import { createSetupRoutes } from './routes/setup.js'
+import { createConnectionRoutes } from './routes/connections.js'
 import { createSessionAdapter } from './adapters/dsh/session-adapter.js'
 import { createWorkspaceAdapter } from './adapters/dsh/workspace-adapter.js'
 
@@ -568,6 +569,25 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     return typeof ctx.get === 'function' ? ctx.get(name) : ctx[name]
   }
 
+  const connectionRoutes = createConnectionRoutes({
+    readJson,
+    sendJson,
+    requireIdentity,
+    group,
+    state,
+    version,
+    port: config.port,
+    allEndpoints,
+    collabRoot,
+    collabWorkspace,
+    advertisedBaseUrl,
+    absoluteDir,
+    assertInCollabRoot,
+    listWorkspaceFiles,
+    resolveWorkspaceFile,
+    mediaTypeFor
+  })
+
   const setupRoutes = createSetupRoutes({
     isLoopback,
     checkCsrf,
@@ -659,49 +679,8 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     }
 
     // 组内握手：邀请码换共享密钥，以及 peer 之间探活。都不走手机 token。
-    if (method === 'POST' && path === '/api/group/join') {
-      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
-      const body = await readJson(req)
-      sendJson(
-        res,
-        200,
-        group.acceptJoin(
-          {
-            code: body.code,
-            baseUrl: body.baseUrl,
-            deviceId: body.deviceId,
-            name: body.name,
-            version: typeof body.version === 'string' ? body.version : null,
-            collabRoot: typeof body.collabRoot === 'string' ? body.collabRoot : null,
-            collabWorkspaceId: typeof body.collabWorkspaceId === 'string' ? body.collabWorkspaceId : null,
-            selfCollabRoot: collabRoot(),
-            selfCollabWorkspaceId: collabWorkspace()?.id ?? null
-          },
-          req.socket.remoteAddress
-        )
-      )
-      return
-    }
-
-    if (method === 'POST' && path === '/api/group/hello') {
-      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
-      const header = req.headers.authorization
-      const token = typeof header === 'string' && header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : ''
-      if (!group.secretMatches(token)) throw new BridgeError('auth/unauthorized', '绑定组密钥不正确', 401)
-      sendJson(res, 200, {
-        groupId: state.group?.id ?? null,
-        name: state.group?.name ?? null,
-        deviceId: state.deviceId,
-        hostName: state.hostName,
-        version,
-        port: config.port,
-        endpoints: allEndpoints(),
-        collabRoot: collabRoot(),
-        collabWorkspaceId: collabWorkspace()?.id ?? null,
-        peers: group.snapshot().peers
-      })
-      return
-    }
+    // 绑定组与协作：join/hello 不需要设备身份，其余在模块内部惰性解析。
+    if (await connectionRoutes({ req, res, url, method, path })) return
 
     const identity = requireIdentity(req)
     const device = identity.device
@@ -744,62 +723,6 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     if (await workspaceRoutes({ req, res, url, method, path })) return
 
 
-    if (method === 'GET' && path === '/api/group') {
-      sendJson(res, 200, { ...(group?.snapshot?.() ?? { group: null, peers: [], invite: null }), collabRoot: collabRoot() })
-      return
-    }
-
-    // 手机端组队：同一部手机绑定过的电脑，由手机牵线组成同一个绑定组。
-    if (method === 'POST' && path === '/api/group/invite') {
-      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
-      if (group.group === null) group.create({ name: null })
-      const invite = group.rotateInvite()
-      sendJson(res, 200, {
-        invite,
-        ...group.snapshot(),
-        endpoints: allEndpoints(),
-        collabRoot: collabRoot()
-      })
-      return
-    }
-
-    if (method === 'POST' && path === '/api/group/link') {
-      if (group === null) throw new BridgeError('group/unavailable', '绑定组功能不可用', 503)
-      const body = await readJson(req)
-      const selfBaseUrl = advertisedBaseUrl(body.peerBaseUrl, body.selfBaseUrl)
-      const result = await group.joinRemote({
-        baseUrl: body.peerBaseUrl,
-        code: body.code,
-        selfBaseUrl,
-        collabRoot: collabRoot()
-      })
-      sendJson(res, 200, { ...result, endpoints: allEndpoints(), collabRoot: collabRoot() })
-      return
-    }
-
-    if (method === 'GET' && path === '/api/collab/files') {
-      const dir = absoluteDir(url.searchParams.get('cwd'))
-      assertInCollabRoot(dir)
-      const since = Number(url.searchParams.get('since'))
-      sendJson(res, 200, { cwd: dir, files: listWorkspaceFiles(dir, since) })
-      return
-    }
-
-    if (method === 'GET' && path === '/api/collab/file') {
-      const dir = absoluteDir(url.searchParams.get('cwd'))
-      assertInCollabRoot(dir)
-      const { target, info } = resolveWorkspaceFile(dir, url.searchParams.get('path') ?? '')
-      const body = readFileSync(target)
-      res.writeHead(200, {
-        'content-type': mediaTypeFor(target),
-        'content-length': info.size,
-        'cache-control': 'no-store',
-        'x-content-type-options': 'nosniff',
-        'content-disposition': `attachment; filename="${relative(dir, target).split(sep).join('_')}"`
-      })
-      res.end(body)
-      return
-    }
 
     if (method === 'GET' && path === '/api/permission-presets') {
       const presets = service('permissionPresets')

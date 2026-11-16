@@ -1,4 +1,4 @@
-# 测试与门禁（R25：从 README 拆出的单一事实源）
+﻿# 测试与门禁（R25：从 README 拆出的单一事实源）
 
 > 所有"能不能发版"的判断都以这份文档为准。README 只保留一行指针，避免两处数字漂移。
 
@@ -6,7 +6,7 @@
 
 | 层 | 命令 | 现状 | 覆盖 |
 |---|---|---|---|
-| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **150 例（149 过 + 1 跳过）**，25 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
+| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **159 例（158 过 + 1 跳过）**，26 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
 | Android 数据层 | `powershell -File tools/test-android.ps1` | **34 例** | 配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移 |
 | 真实宿主契约 | `cd host && $env:DSH_BRIDGE_INTEGRATION='1'; node --test test/integration/prompt.test.js` | 1 例（默认跳过） | 对运行中的桥接跑真 prompt 并核对历史落盘 |
 
@@ -29,7 +29,7 @@
 | `adapters.test.js` | 宿主形状差异（`{items}` 与裸数组、同步/异步 `resolveByPath`、归档集合读不到） |
 | `compatibility-check.test.js` | 探针的必需/可选分级、签名漂移、空 ctx |
 | `services.test.js` | 图片数量/类型/base64/大小上限、标题、时区、文件名、路径比较 |
-| `routes-workspaces.test.js` / `routes-setup.test.js` | 拆出来的路由族（不经过 HTTP） |
+| `routes-workspaces.test.js` / `routes-setup.test.js` | 拆出来的路由族（不经过 HTTP） |`n| `routes-connections.test.js` | 绑定组与协作路由族：join/hello 在身份解析之前、协作文件不出白名单、`requireIdentity` 只在需要的路径上调用 |
 
 ### 1.2 Android 侧细节
 
