@@ -9,7 +9,7 @@
 | Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **181 例（180 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
 | Android 数据层 | `powershell -File tools/test-android.ps1` | **55 例** | 配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移、连接路由决策、会话与时间线折叠、时间线行折叠与纯文本导出 |
 | 真实宿主契约 | `cd host && $env:DSH_BRIDGE_INTEGRATION='1'; node --test test/integration/prompt.test.js` | 1 例（默认跳过） | 对运行中的桥接跑真 prompt 并核对历史落盘 |
-| 验收矩阵（API 层） | `node tools/acceptance.mjs --out docs/ACCEPTANCE-RESULT-x.md` | 11 项自动 + 10 项待真机 | 配对/鉴权/列表/建会话/归档/日志/图片校验；结果可归档 |
+| 验收矩阵（API 层） | `node tools/acceptance.mjs --out docs/ACCEPTANCE-RESULT-x.md` | 13 项自动 + 9 项待真机 | 配对/鉴权/列表/建会话/归档/取消归档/日志/图片校验/彻底删除/事件流鉴权；结果可归档 |
 
 `node --test` 里那 1 条"跳过"就是集成用例：没设 `DSH_BRIDGE_INTEGRATION=1` 时它不会去动你的 DSH。
 
@@ -61,7 +61,8 @@ ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；纯 ASC
 
 `tools/verify-package.mjs`：解开 tgz → 逐文件比 `lib/**` SHA-256（不漏不多）→ 校验
 `package.json` / `lib/index.js` / `build.gradle.kts` 三处版本号一致 → 和
-`dist/SHA256SUMS-<版本>.txt` 对账。任一项不符输出差异表并以退出码 1 结束。
+`dist/SHA256SUMS-<版本>.txt` 对账 → **用 aapt2 读 `dist` 里的 APK，核对 versionName / versionCode**
+（防止「升了版号但没重打 APK」）。任一项不符输出差异表并以退出码 1 结束。
 
 它抓到过的真实问题：0.8.8 产物落后源码 7 个文件；`lib/adapters/` 加进来之后，浅层扫描
 把适配层误判成"tgz 多出的文件"。

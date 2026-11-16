@@ -94,16 +94,17 @@ async function nextPairingCode() {
 async function main() {
   console.log(`目标：${BASE}`)
 
-  await check('A0', '健康检查与设备身份', async () => {
+  // A0/A1 是所有检查的前提（拿版本号与 token），--only 时也静默跑一遍
+  async function prepareHealth() {
     const health = await call('/health')
     assert(health.status === 200 && health.body?.ok === true, `health 异常：${health.status}`)
     deviceId = health.body.deviceId
     hostVersion = health.body.version
     return `v${health.body.version} · ${deviceId}`
-  })
+  }
 
-  await check('A1', '配对：面板码换设备 token', async () => {
-    const { code, deviceId: panelDeviceId } = await nextPairingCode()
+  async function preparePair() {
+    const { code } = await nextPairingCode()
     assert(/^\d{6}$/.test(String(code)), '面板没有给出 6 位配对码')
     const paired = await call('/api/pair', {
       method: 'POST',
@@ -114,8 +115,24 @@ async function main() {
     assert(/^dshm_/.test(token), 'token 不是 dshm_ 前缀')
     const info = await call('/api/info', { auth: true })
     assert(info.status === 200, '/api/info 带 token 也失败')
-    return `deviceId=${panelDeviceId ?? deviceId}`
+    return { code, deviceId: healthDeviceId() }
+  }
+
+  function healthDeviceId() {
+    return deviceId
+  }
+
+  await check('A0', '健康检查与设备身份', prepareHealth)
+  await check('A1', '配对：面板码换设备 token', async () => {
+    const result = await preparePair()
+    return `deviceId=${result.deviceId ?? deviceId}`
   })
+
+  // --only 模式下如果上面两项被跳过，这里补做一次准备工作
+  if (token === '') {
+    await prepareHealth()
+    await preparePair()
+  }
 
   await check('A1b', '鉴权：错码与无 token 都被拒', async () => {
     const wrong = await call('/api/pair', {
@@ -230,6 +247,40 @@ async function main() {
     return `${text.length} 字`
   })
 
+  await check('A20', '彻底删除：停止后删除会话日志目录', async () => {
+    const workspaces = await call('/api/workspaces', { auth: true })
+    const workspace = (workspaces.body.workspaces ?? [])[0]
+    assert(workspace !== undefined, '没有工作区，无法建临时会话')
+    // 建一个空会话（不派 prompt），删它不影响任何真实任务
+    const created = await call('/api/sessions', { method: 'POST', auth: true, body: { workspaceId: workspace.id } })
+    assert(created.status === 200, `建临时会话失败：${created.status} ${JSON.stringify(created.body)}`)
+    const throwaway = created.body.sessionId
+    await call(`/api/sessions/${encodeURIComponent(throwaway)}/cancel`, { method: 'POST', auth: true, body: {} })
+    await new Promise((resolve) => setTimeout(resolve, 800))
+    const removed = await call(`/api/sessions/${encodeURIComponent(throwaway)}`, { method: 'DELETE', auth: true })
+    // 契约允许两种结果：删掉（200），或会话仍驻留 DSH 内存里（409 session/loaded，
+    // 需要重启宿主才能删）。后者不是失败，但要如实报告。
+    if (removed.status === 409) {
+      assert(
+        removed.body?.error?.code === 'session/loaded',
+        `409 的错误码应是 session/loaded，实际 ${removed.body?.error?.code}`
+      )
+      return `${throwaway.slice(0, 18)}… 驻留内存（409 session/loaded），按契约需重启后删除`
+    }
+    assert(removed.status === 200, `删除失败：${removed.status} ${JSON.stringify(removed.body)}`)
+    const gone = await call(`/api/sessions/${encodeURIComponent(throwaway)}`, { auth: true })
+    assert(gone.status === 404, `删除后仍能读到：${gone.status}`)
+    return `${throwaway.slice(0, 18)}… 已删除（${removed.body?.filesRemoved ?? 0} 个目录）`
+  })
+
+  await check('A21', '事件流鉴权：无 token 401，伪造 token 401', async () => {
+    const anonymous = await fetch(`${BASE}/api/events`)
+    assert(anonymous.status === 401, `无 token 应当 401，实际 ${anonymous.status}`)
+    const forged = await fetch(`${BASE}/api/events`, { headers: { authorization: 'Bearer dshm_bogus' } })
+    assert(forged.status === 401, `伪造 token 应当 401，实际 ${forged.status}`)
+    return '无 token 401 · 伪造 401'
+  })
+
   skip('A5', '双端审批（手机先答/桌面先答）', '需要真实触发一次工具调用审批，只能在设备上做')
   skip('A7', 'plan-review 批准后继续', '同上，需要模型进入计划模式')
   skip('A9', '历史图片回显与全屏', '需要在手机上点开图片')
@@ -239,7 +290,6 @@ async function main() {
   skip('A15', '电脑归档 → 手机就地取消', '需要手机上正开着该会话')
   skip('A18', 'NAT 虚拟机自动发现', '需要宿主机 discovery-relay 与设备')
   skip('A19', '前台服务与后台通知', '需要设备锁屏观察')
-  skip('A20', '彻底删除（运行中拒绝 → 停止后删除）', '会真的删日志目录，验收时人工执行')
 
   const failures = results.filter((item) => item.state === 'fail').length
   const skipped = results.filter((item) => item.state === 'skip').length

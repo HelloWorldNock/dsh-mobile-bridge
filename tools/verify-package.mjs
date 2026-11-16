@@ -160,6 +160,30 @@ function short(hash) {
   return hash === null ? '—' : hash.slice(0, 12)
 }
 
+/**
+ * 读 APK 的 versionCode / versionName（用 SDK 的 aapt2）。
+ * 没有工具链或没有 APK 时返回 null——由调用方决定是提示还是报错。
+ */
+async function readApkBadging(apkPath) {
+  const buildTools = join(REPO, '.toolchain', 'android-sdk', 'build-tools')
+  if (!existsSync(buildTools)) return null
+  const dirs = (await readdir(buildTools, { withFileTypes: true }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .reverse()
+  const aapt2 = dirs
+    .map((name) => join(buildTools, name, process.platform === 'win32' ? 'aapt2.exe' : 'aapt2'))
+    .find((candidate) => existsSync(candidate))
+  if (aapt2 === undefined) return null
+  const { spawnSync } = await import('node:child_process')
+  const result = spawnSync(aapt2, ['dump', 'badging', apkPath], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })
+  if (result.status !== 0) return null
+  const match = (result.stdout ?? '').match(/versionCode='(\d+)' versionName='([^']+)'/)
+  if (match === null) return null
+  return { versionCode: match[1], versionName: match[2] }
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   const problems = []
@@ -269,10 +293,36 @@ async function main() {
     else if (row.hash !== tarballHash) problems.push(`tgz 实测哈希 ${short(tarballHash)} ≠ SHA256SUMS 记录 ${short(row.hash)}`)
   }
 
-  return finish({ problems, notes, version, versions, tarball, tarballHash, tarballSize, rows, extraLib, inner })
+  // 6) APK 的版本号必须和源码一致（防止「升了版号但没重打 APK」）
+  const apkDir = join(REPO, 'dist')
+  const apkCandidates = existsSync(apkDir)
+    ? (await readdir(apkDir))
+        .filter((name) => name.startsWith(`TS7-DSH-Remote-${version}`) && name.endsWith('.apk'))
+        .sort()
+    : []
+  let apk = null
+  if (apkCandidates.length === 0) {
+    notes.push(`dist 里没有 ${version} 的 APK：只校了 host 包（发版前要补 APK）`)
+  } else {
+    const preferred = apkCandidates.find((name) => name.includes('arm64-v8a')) ?? apkCandidates[0]
+    const badging = await readApkBadging(join(apkDir, preferred))
+    if (badging === null) {
+      notes.push(`读不到 ${preferred} 的 badging（缺 build-tools 里的 aapt2？）`)
+    } else {
+      apk = { file: preferred, ...badging }
+      if (!badging.versionName.startsWith(version)) {
+        problems.push(`APK 版本名 ${badging.versionName} 与源码 ${version} 不一致（升版后忘了重打 APK？）`)
+      }
+      if (versions.versionCode !== null && badging.versionCode !== String(versions.versionCode)) {
+        problems.push(`APK versionCode ${badging.versionCode} ≠ build.gradle.kts 的 ${versions.versionCode}`)
+      }
+    }
+  }
+
+  return finish({ problems, notes, version, versions, tarball, tarballHash, tarballSize, rows, extraLib, inner, apk })
 }
 
-function finish({ problems, notes, version, versions, tarball, tarballHash = null, tarballSize = null, rows = [], extraLib = [], inner = new Map() }) {
+function finish({ problems, notes, version, versions, tarball, tarballHash = null, tarballSize = null, rows = [], extraLib = [], inner = new Map(), apk = null }) {
   const result = {
     ok: problems.length === 0,
     version,
@@ -288,6 +338,7 @@ function finish({ problems, notes, version, versions, tarball, tarballHash = nul
     filesInTarball: inner.size,
     rows,
     extraLib,
+    apk,
     problems,
     notes
   }
@@ -301,6 +352,7 @@ function finish({ problems, notes, version, versions, tarball, tarballHash = nul
     console.log(`  Android versionName    ${versions?.gradle ?? '缺失'} (versionCode ${versions?.versionCode ?? '缺失'})`)
     console.log(`  tarball                ${tarball}`)
     if (tarballHash !== null) console.log(`  tarball sha256         ${tarballHash}  ${tarballSize} B / ${inner.size} 个文件`)
+    if (apk !== null) console.log(`  APK 版本               ${apk.file} → ${apk.versionName} (versionCode ${apk.versionCode})`)
     if (rows.length > 0) {
       console.log('')
       console.log(`  ${pad('文件', 20)}${pad('结果', 8)}${pad('源码', 22)}${pad('tgz', 22)}`)

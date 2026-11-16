@@ -16,7 +16,7 @@
 | R06 | README + contrib | ✅ | 7 条路由、0.8.6–0.9.x 能力、删 `resync`、Windows 权限描述、五级口径；`contrib/` 跟到最新发布版 |
 | R07 | 三处升版 + Note | ✅ | 每版 `package.json` / `index.js` / `build.gradle.kts` 一致，`docs/RELEASE-*.md` 齐 |
 | R08 | 正式发布 | ✅ | v0.8.9 → v0.9.8 共 10 个 Release，资产含 tgz / 三包 APK / tsnode / SHA256SUMS |
-| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（11 项自动 + 10 项待真机），首份报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md) |
+| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（**13 项自动 + 9 项待真机**），报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md)：12 通过 / 1 失败（A8，运行中的 0.8.8 未重启）/ 9 跳过 |
 | R10 | 最小 CI | ✅ | `.github/workflows/ci.yml`：`check.mjs` + `node --test` + 打包后过门禁 + `build-client --check` |
 
 ## 阶段二：可靠性强化（R11–R18）
