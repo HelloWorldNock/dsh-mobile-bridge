@@ -531,6 +531,30 @@ class BridgeRepository(
         sync()
     }
 
+    /**
+     * 主机不再认这把 token（面板撤销了设备 / 换了机器 / 重置过状态）：
+     * 立刻把本机保存的凭据清掉，只留地址，重新输入配对码就能恢复。
+     */
+    private fun revokeToken(runtime: Runtime, message: String) {
+        runtime.client = null
+        runtime.connection = ConnectionState.Error
+        runtime.error = message
+        if (runtime.profile.token.isBlank()) {
+            sync()
+            return
+        }
+        runtime.profile = runtime.profile.copy(token = "")
+        runtime.sessions = emptyList()
+        runtime.pending = PendingState()
+        runtime.detail = null
+        runtime.lastDetail = null
+        runtime.timeline = emptyList()
+        runtime.streamText = ""
+        persist()
+        RunLog.warn("auth", "${runtime.label} 的 token 已被主机拒绝，已从本机清除")
+        sync()
+    }
+
     fun forget(hostId: String? = activeId) {
         val id = hostId ?: return
         val runtime = runtimes.remove(id) ?: return
@@ -938,7 +962,10 @@ class BridgeRepository(
                 runtime.connection = ConnectionState.Error
                 runtime.error = failure.message?.takeIf { it.isNotBlank() } ?: "无法连接主机"
                 sync()
-                if (failure is ApiException && failure.status == 401) break
+                if (failure is ApiException && failure.status == 401) {
+                    revokeToken(runtime, "配对已失效（token 被撤销或主机重置），请重新配对")
+                    break
+                }
                 attempt += 1
                 delay(ReconnectPolicy.connectBackoffMs(attempt))
             }
@@ -1042,9 +1069,7 @@ class BridgeRepository(
                 if (!isActive) break
                 if (failure is ApiException && failure.status == 401) {
                     RunLog.error("sse", "${runtime.label} 事件流被拒绝（401），需要重新配对")
-                    runtime.connection = ConnectionState.Error
-                    runtime.error = failure.message
-                    sync()
+                    revokeToken(runtime, "配对已失效（token 被撤销或主机重置），请重新配对")
                     break
                 }
                 runtime.eventFailures += 1

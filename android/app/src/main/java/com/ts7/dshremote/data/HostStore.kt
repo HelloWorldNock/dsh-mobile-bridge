@@ -1,4 +1,4 @@
-package com.ts7.dshremote.data
+﻿package com.ts7.dshremote.data
 
 import android.content.Context
 import java.net.URI
@@ -35,7 +35,7 @@ object HostStore {
     internal const val KEY_LEGACY_TOKEN = "token"
     internal const val KEY_LEGACY_DEVICE_ID = "deviceId"
 
-    fun load(context: Context): List<PairedHost> = load(KeyValueStore.of(context))
+    fun load(context: Context): List<PairedHost> = load(SecureStorage.store(context))
 
     /** @param now 迁移时写 `addedAt`；单测传入固定值。 */
     fun load(store: KeyValueStore, now: () -> Long = { System.currentTimeMillis() }): List<PairedHost> {
@@ -62,17 +62,17 @@ object HostStore {
         return listOf(migrated)
     }
 
-    fun save(context: Context, hosts: List<PairedHost>) = save(KeyValueStore.of(context), hosts)
+    fun save(context: Context, hosts: List<PairedHost>) = save(SecureStorage.store(context), hosts)
 
     fun save(store: KeyValueStore, hosts: List<PairedHost>) {
         store.putString(KEY_HOSTS, JsonConfig.json.encodeToString(hosts))
     }
 
-    fun activeId(context: Context): String? = activeId(KeyValueStore.of(context))
+    fun activeId(context: Context): String? = activeId(SecureStorage.store(context))
 
     fun activeId(store: KeyValueStore): String? = store.getString(KEY_ACTIVE)
 
-    fun setActive(context: Context, id: String?) = setActive(KeyValueStore.of(context), id)
+    fun setActive(context: Context, id: String?) = setActive(SecureStorage.store(context), id)
 
     fun setActive(store: KeyValueStore, id: String?) {
         store.putString(KEY_ACTIVE, id)

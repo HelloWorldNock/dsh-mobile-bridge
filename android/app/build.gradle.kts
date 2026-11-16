@@ -64,6 +64,8 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.5")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // 配对 token 的静态加密（主密钥在 Android Keystore，键名 AES256-SIV、值 AES256-GCM）。
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 

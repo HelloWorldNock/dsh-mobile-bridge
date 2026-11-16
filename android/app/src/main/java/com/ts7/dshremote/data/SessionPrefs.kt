@@ -1,4 +1,4 @@
-package com.ts7.dshremote.data
+﻿package com.ts7.dshremote.data
 
 import android.content.Context
 
@@ -9,11 +9,11 @@ import android.content.Context
 object SessionPrefs {
     internal const val KEY_SHOW_DETAILS = "timeline.showDetails"
 
-    fun showDetails(context: Context): Boolean = showDetails(KeyValueStore.of(context))
+    fun showDetails(context: Context): Boolean = showDetails(SecureStorage.store(context))
 
     fun showDetails(store: KeyValueStore): Boolean = store.getBoolean(KEY_SHOW_DETAILS, false)
 
-    fun setShowDetails(context: Context, value: Boolean) = setShowDetails(KeyValueStore.of(context), value)
+    fun setShowDetails(context: Context, value: Boolean) = setShowDetails(SecureStorage.store(context), value)
 
     fun setShowDetails(store: KeyValueStore, value: Boolean) {
         store.putBoolean(KEY_SHOW_DETAILS, value)

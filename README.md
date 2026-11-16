@@ -100,7 +100,7 @@ dist/                 debug APK 与插件 tgz 产物
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.8.9.tgz（约 9.0 MB / 29 个文件，含 bin/tsnode-windows-amd64.exe）
+# → dist/dsh-mobile-bridge-0.9.0.tgz（约 9.0 MB / 29 个文件，含 bin/tsnode-windows-amd64.exe）
 
 # 发布门禁：解包逐文件比对 SHA-256，并检查三处版本号一致（不一致退出码 1）
 node tools/verify-package.mjs
@@ -111,16 +111,16 @@ node tools/verify-package.mjs
 脚本校验图标体积（≤ 256 KiB）与包内清单后调 `npm pack`，清单不全直接失败。装到任意 profile：
 
 ```powershell
-dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.8.9.tgz
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.9.0.tgz
 ```
 
 `dsh plugin add` 会同时写入该 profile 的 `dsh.profile.bundles`，重启 DSH 即加载，桥接按 `cordis.patch.yml` 的默认值监听 `48123`/`48124`。已用一次性 profile `pkgtest` 实测安装 → `--dump-config` 能看到 `id: mobile-bridge` 及端口配置。
 
-分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.8.9.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
+分发渠道元数据在 `contrib/`（awesome-dsh-plugin 的 YAML 与 dshmarket 的 `plugins.json`），发布前替换 `OWNER`/`REPO`、把 tgz 传到 GitHub Release（同时附上 `tsnode-windows-amd64.exe` 与 `SHA256SUMS-0.9.0.txt`，方便有人从源码安装时不必自己编译）；细节见 [`contrib/README.md`](contrib/README.md) 与 [`host/README.md`](host/README.md)。
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.8.9-debug.apk`。
+1. 安装 `dist/TS7-DSH-Remote-0.9.0-debug.apk`。
 2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
 3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`，并打开表单下方的「通过 Tailscale 连接」开关）。
 4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
@@ -329,7 +329,7 @@ DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧�
 | L4 已真机 | 真实 Android 设备上完成操作 | 真机矩阵有记录 |
 | L5 已交付 | 独立环境安装、配对、运行、升级 | 另一台机器复现 |
 
-当前 0.8.9 的状态：Host 侧（配对、会话、prompt/流式、审批/提问、归档与取消归档、工作区、绑定组、协作）是 **L2**；`live bridge` 本身处于运行状态，但 Android 端 0.8.9 的归档/取消归档、断线重连与跨网络切换只做到 **L1/L2**，真机矩阵（R09）待跑。**结论口径：项目核心功能具备代码实现与 Host 单元测试基础，Host 桥接服务已运行；Android 端完整功能、跨网络稳定性及真实设备体验尚待 0.8.9 一轮验收。**
+当前 0.9.0 的状态：Host 侧（配对、会话、prompt/流式、审批/提问、归档与取消归档、工作区、绑定组、协作、宿主探针、鉴权矩阵）是 **L2**，并有 1 条对真实宿主跑通的契约用例（L3）；Android 数据层（配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移）有 34 例 JVM 单测（**L2**），Keystore 加密与网络策略只做到 **L1 + 可构建**（APK 内已含 `EncryptedSharedPreferences` 与策略码）；真机矩阵（R09）待跑。**结论口径：项目核心功能具备代码实现与 Host 单元测试基础，Host 桥接服务已运行；Android 端完整功能、跨网络稳定性及真实设备体验尚待一轮真机验收。**
 
 注意：PC 控制端已从网页改为 DSH client 插件，`host/lib/setup-page.js` 已删除。更新 `client.js` 后在 DSH 窗口按 F5 刷新页面即可加载；只有修改 host `server.js` 才需要完整重启 Electron。需要完整重启时可运行 `tools/restart-dsh.cmd`。
 
@@ -408,8 +408,8 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 
 ## 交付物
 
-- `dist/TS7-DSH-Remote-0.8.9-debug.apk`
-- `dist/dsh-mobile-bridge-0.8.9.tgz`
+- `dist/TS7-DSH-Remote-0.9.0-debug.apk`
+- `dist/dsh-mobile-bridge-0.9.0.tgz`
 - `host/`（可独立安装的 DSH bundle）
 - `android/`（完整源码）
 - `README.md`
