@@ -290,6 +290,63 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * 版本与更新卡片（R22 第七刀）。
+     *
+     * 从 `PanelBody` 搬出：只吃 `version` / `update` / `busy` / `error` 与一个「检查更新」回调。
+     * 文案分支（没查过 / 查询失败 / 有新版本 / 已最新）都在组件内，方便逐条断言。
+     */
+    function UpdateCard({ version, update, busy, error, onCheck }) {
+      return h(
+        "div",
+        { className: "dmb-card" },
+        h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "版本"),
+        h(
+          "div",
+          { className: "dmb-setting" },
+          h(
+            "div",
+            { className: "grow" },
+            h("div", { className: "name" }, `dsh-mobile-bridge ${version || ""}`),
+            h(
+              "div",
+              { className: "hint" },
+              update === null
+                ? "还没查过 GitHub 上的最新版本。"
+                : update.error
+                  ? update.error
+                  : update.hasUpdate
+                    ? `发现新版本 ${update.latest}（当前 ${update.current}），${fmtTime(update.checkedAt)} 查到。`
+                    : `已是最新版本，${fmtTime(update.checkedAt)} 查过。`,
+            ),
+          ),
+          h("button", { className: "dmb-btn", disabled: busy !== "", onClick: onCheck }, busy === "update" ? "检查中…" : "检查更新"),
+        ),
+        error !== "" ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, error) : null,
+        update !== null && update.hasUpdate
+          ? h(
+              "div",
+              { className: "dmb-setting" },
+              h(
+                "div",
+                { className: "grow" },
+                h("div", { className: "name" }, `新版本 ${update.latest}`),
+                h("div", { className: "hint" }, update.notes ? update.notes : "去发布页看这次改了什么。"),
+              ),
+              h("a", { className: "dmb-btn primary", href: update.url, target: "_blank", rel: "noreferrer" }, "打开发布页"),
+            )
+          : null,
+        update !== null && !update.hasUpdate && update.url
+          ? h(
+              "div",
+              { className: "dmb-sub", style: { marginTop: 8 } },
+              "更新包：",
+              h("a", { href: update.url, target: "_blank", rel: "noreferrer", style: { color: "#4D6BFE" } }, update.url),
+            )
+          : null,
+      )
+    }
+
 
     /**
      * 宿主兼容性横幅。探针在 DSH 启动时跑一次，结果随 /api/setup/state 下发：
@@ -1051,66 +1108,13 @@ window.__ModuleLoader__.load({
               })
             : null,
           snap
-            ? h(
-                "div",
-                { className: "dmb-card" },
-                h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "版本"),
-                h(
-                  "div",
-                  { className: "dmb-setting" },
-                  h(
-                    "div",
-                    { className: "grow" },
-                    h("div", { className: "name" }, `dsh-mobile-bridge ${snap.version || ""}`),
-                    h(
-                      "div",
-                      { className: "hint" },
-                      update === null
-                        ? "还没查过 GitHub 上的最新版本。"
-                        : update.error
-                          ? update.error
-                          : update.hasUpdate
-                            ? `发现新版本 ${update.latest}（当前 ${update.current}），${fmtTime(update.checkedAt)} 查到。`
-                            : `已是最新版本，${fmtTime(update.checkedAt)} 查过。`,
-                    ),
-                  ),
-                  h(
-                    "button",
-                    { className: "dmb-btn", disabled: busy !== "", onClick: checkUpdate },
-                    busy === "update" ? "检查中…" : "检查更新",
-                  ),
-                ),
-                updateError !== "" ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, updateError) : null,
-                update !== null && update.hasUpdate
-                  ? h(
-                      "div",
-                      { className: "dmb-setting" },
-                      h(
-                        "div",
-                        { className: "grow" },
-                        h("div", { className: "name" }, `新版本 ${update.latest}`),
-                        h(
-                          "div",
-                          { className: "hint" },
-                          update.notes ? update.notes : "去发布页看这次改了什么。",
-                        ),
-                      ),
-                      h(
-                        "a",
-                        { className: "dmb-btn primary", href: update.url, target: "_blank", rel: "noreferrer" },
-                        "打开发布页",
-                      ),
-                    )
-                  : null,
-                update !== null && !update.hasUpdate && update.url
-                  ? h(
-                      "div",
-                      { className: "dmb-sub", style: { marginTop: 8 } },
-                      "更新包：",
-                      h("a", { href: update.url, target: "_blank", rel: "noreferrer", style: { color: "#4D6BFE" } }, update.url),
-                    )
-                  : null,
-              )
+            ? h(UpdateCard, {
+                version: snap.version,
+                update,
+                busy,
+                error: updateError,
+                onCheck: checkUpdate,
+              })
             : null,
           snap
             ? h(

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { DevicesCard, LogCard } from '../client-src/components.mjs'
+import { DevicesCard, LogCard, UpdateCard } from '../client-src/components.mjs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -264,5 +264,64 @@ test('LogCard collapses, expands and wires its callbacks', () => {
     assert.match(loading, /读取中/)
   } finally {
     delete globalThis.h
+  }
+})
+
+
+test('UpdateCard covers every version branch and its callbacks', () => {
+  globalThis.h = (type, props, ...children) => ({ type, props: props ?? {}, children })
+  globalThis.fmtTime = () => '时间点'
+  try {
+    const text = (node) => flatten(node).join(' ')
+    const base = { version: '0.9.11', busy: '', error: '', onCheck: () => {} }
+
+    // 1) 还没查过
+    assert.match(text(UpdateCard({ ...base, update: null })), /还没查过 GitHub 上的最新版本/)
+
+    // 2) 查询失败：显示错误，不显示「已最新」
+    const failed = text(UpdateCard({ ...base, update: { error: 'rate limited' } }))
+    assert.match(failed, /rate limited/)
+    assert.ok(!failed.includes('已是最新'))
+
+    // 3) 有新版本：出现版本号、说明与发布页链接
+    const found = UpdateCard({
+      ...base,
+      update: { hasUpdate: true, latest: '0.9.12', current: '0.9.11', url: 'https://example.test/rel', notes: '修了 X', checkedAt: 'now' }
+    })
+    const foundText = text(found)
+    assert.match(foundText, /发现新版本 0\.9\.12/)
+    assert.match(foundText, /修了 X/)
+    const link = (function find(node, out = []) {
+      if (node === null || typeof node !== 'object') return out
+      if (node.type === 'a') out.push(node)
+      for (const child of node.children ?? []) find(child, out)
+      return out
+    })(found)[0]
+    assert.equal(link.props.href, 'https://example.test/rel')
+
+    // 4) 已是最新：底部给更新包地址
+    const latest = text(UpdateCard({ ...base, update: { hasUpdate: false, url: 'https://example.test/latest', checkedAt: 'now' } }))
+    assert.match(latest, /已是最新版本/)
+    assert.match(latest, /更新包/)
+
+    // 5) 检查中：按钮禁用且改文案；错误条单独出现
+    let checked = 0
+    const busyCard = UpdateCard({ ...base, update: null, busy: 'update', error: '出错了', onCheck: () => { checked += 1 } })
+    const buttons = (function find(node, out = []) {
+      if (node === null) return out
+      if (Array.isArray(node)) { for (const c of node) find(c, out); return out }
+      if (typeof node !== 'object') return out
+      if (node.type === 'button') out.push(node)
+      for (const child of node.children ?? []) find(child, out)
+      return out
+    })(busyCard)
+    assert.equal(buttons[0].props.disabled, true)
+    assert.match(text(busyCard), /检查中/)
+    assert.match(text(busyCard), /出错了/)
+    buttons[0].props.onClick()
+    assert.equal(checked, 1)
+  } finally {
+    delete globalThis.h
+    delete globalThis.fmtTime
   }
 })
