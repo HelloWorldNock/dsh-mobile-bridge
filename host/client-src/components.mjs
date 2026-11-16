@@ -179,3 +179,106 @@ export function UpdateCard({ version, update, busy, error, onCheck }) {
       : null,
   )
 }
+
+/**
+ * 桥接设置卡片（R22 第八刀）：手机优先审批、局域网发现、三个等待时长、协作工作区、
+ * 默认工作区目录，以及保存按钮。
+ *
+ * 只吃 `form` 与回调：改字段走 `onPatch(patch)`，保存走 `onSave()`，
+ * 真正的 POST 与状态仍在 `PanelBody`。
+ */
+export function BridgeSettingsCard({ workspaces, form, error, busy, saved, onPatch, onSave }) {
+  return h(
+    "div",
+    { className: "dmb-card" },
+    h("div", { className: "dmb-label", style: { marginBottom: 6 } }, "桥接设置"),
+    error !== "" ? h("div", { className: "dmb-alert", style: { marginBottom: 10 } }, error) : null,
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h("div", { className: "grow" }, h("div", { className: "name" }, "手机优先审批"), h("div", { className: "hint" }, "手机在线时由手机处理审批与提问；超时或离线自动交回桌面。")),
+      h("input", { className: "dmb-switch", type: "checkbox", checked: form.phoneFirst, onChange: (event) => onPatch({ phoneFirst: event.target.checked }) }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h("div", { className: "grow" }, h("div", { className: "name" }, "局域网发现"), h("div", { className: "hint" }, "允许手机通过 UDP 广播自动找到这台电脑。")),
+      h("input", { className: "dmb-switch", type: "checkbox", checked: form.discovery, onChange: (event) => onPatch({ discovery: event.target.checked }) }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h("div", { className: "grow" }, h("div", { className: "name" }, "审批等待"), h("div", { className: "hint" }, "秒；超时后交回桌面处理。")),
+      h("input", { className: "dmb-num", type: "number", min: 5, max: 600, value: Math.round(form.approvalTimeoutMs / 1000), onChange: (event) => onPatch({ approvalTimeoutMs: Number(event.target.value) * 1000 }) }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h("div", { className: "grow" }, h("div", { className: "name" }, "提问等待"), h("div", { className: "hint" }, "秒；普通用户问题的等待时间。")),
+      h("input", { className: "dmb-num", type: "number", min: 5, max: 600, value: Math.round(form.questionTimeoutMs / 1000), onChange: (event) => onPatch({ questionTimeoutMs: Number(event.target.value) * 1000 }) }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h("div", { className: "grow" }, h("div", { className: "name" }, "计划审阅等待"), h("div", { className: "hint" }, "秒；计划卡片的等待时间。")),
+      h("input", { className: "dmb-num", type: "number", min: 5, max: 600, value: Math.round(form.planReviewTimeoutMs / 1000), onChange: (event) => onPatch({ planReviewTimeoutMs: Number(event.target.value) * 1000 }) }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h(
+        "div",
+        { className: "grow" },
+        h("div", { className: "name" }, "协作工作区"),
+        h("div", { className: "hint" }, "对端派过来的协作任务都在这个工作区里建会话，产物只写这里；不选则用下面手填的绝对路径，都留空表示跟随会话自己的 cwd。"),
+      ),
+      h(
+        "div",
+        { className: "dmb-join", style: { width: 300, marginTop: 0 } },
+        h(
+          "select",
+          {
+            className: "dmb-select",
+            value: form.collabWorkspaceId,
+            onChange: (event) => {
+              const id = event.target.value
+              const picked = (workspaces || []).find((item) => item.id === id)
+              onPatch({ collabWorkspaceId: id, collabRoot: picked ? picked.path : form.collabRoot })
+            },
+          },
+          h("option", { value: "" }, "不限定（使用下面的路径）"),
+          (workspaces || []).map((item) => h("option", { key: item.id, value: item.id }, `${item.title || item.id} — ${item.path}`)),
+        ),
+        h("input", {
+          className: "dmb-input",
+          placeholder: "F:\\collab",
+          value: form.collabRoot,
+          onChange: (event) => onPatch({ collabWorkspaceId: "", collabRoot: event.target.value }),
+        }),
+      ),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h(
+        "div",
+        { className: "grow" },
+        h("div", { className: "name" }, "默认工作区目录"),
+        h("div", { className: "hint" }, "手机新建任务时可以在这个目录下直接建新的工作区文件夹；留空表示手机端不能建。必须是已存在的绝对路径。"),
+      ),
+      h("input", {
+        className: "dmb-input",
+        style: { width: 300 },
+        placeholder: "F:\\AgentWorkProject",
+        value: form.workspaceRoot,
+        onChange: (event) => onPatch({ workspaceRoot: event.target.value }),
+      }),
+    ),
+    h(
+      "div",
+      { className: "dmb-actions", style: { marginTop: 12 } },
+      h("button", { className: "dmb-btn primary", onClick: onSave, disabled: busy !== "" }, busy === "save" ? "保存中…" : "保存设置"),
+      saved ? h("span", { className: "dmb-saved" }, saved) : null,
+    ),
+  )
+}

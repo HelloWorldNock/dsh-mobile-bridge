@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { DevicesCard, LogCard, UpdateCard } from '../client-src/components.mjs'
+import { BridgeSettingsCard, DevicesCard, LogCard, UpdateCard } from '../client-src/components.mjs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -323,5 +323,82 @@ test('UpdateCard covers every version branch and its callbacks', () => {
   } finally {
     delete globalThis.h
     delete globalThis.fmtTime
+  }
+})
+
+
+test('BridgeSettingsCard patches only the touched field, in the right units', () => {
+  globalThis.h = (type, props, ...children) => ({ type, props: props ?? {}, children })
+  try {
+    const patches = []
+    let saves = 0
+    const form = {
+      phoneFirst: true,
+      discovery: false,
+      approvalTimeoutMs: 120_000,
+      questionTimeoutMs: 120_000,
+      planReviewTimeoutMs: 180_000,
+      collabWorkspaceId: '',
+      collabRoot: '',
+      workspaceRoot: ''
+    }
+    const card = BridgeSettingsCard({
+      workspaces: [
+        { id: 'w1', title: '项目 A', path: 'F:\\work\\a' },
+        { id: 'w2', title: '项目 B', path: 'F:\\work\\b' }
+      ],
+      form,
+      error: '保存失败：网络不通',
+      busy: '',
+      saved: '已保存',
+      onPatch: (patch) => patches.push(patch),
+      onSave: () => { saves += 1 }
+    })
+
+    const text = flatten(card).join(' ')
+    for (const label of ['桥接设置', '手机优先审批', '局域网发现', '审批等待', '提问等待', '计划审阅等待', '协作工作区', '默认工作区目录']) {
+      assert.match(text, new RegExp(label), `缺少区块：${label}`)
+    }
+    assert.match(text, /保存失败/)
+    assert.match(text, /已保存/)
+
+    const find = (node, predicate, out = []) => {
+      if (node === null || typeof node !== 'object') return out
+      if (Array.isArray(node)) { for (const c of node) find(c, predicate, out); return out }
+      if (predicate(node)) out.push(node)
+      for (const child of node.children ?? []) find(child, predicate, out)
+      return out
+    }
+
+    // 勾选框：只 patch 自己那个字段
+    const checkboxes = find(card, (n) => n.type === 'input' && n.props.type === 'checkbox')
+    assert.equal(checkboxes.length, 2)
+    checkboxes[0].props.onChange({ target: { checked: false } })
+    assert.deepEqual(patches[0], { phoneFirst: false })
+
+    // 数字框：秒 → 毫秒
+    const numbers = find(card, (n) => n.type === 'input' && n.props.type === 'number')
+    assert.equal(numbers.length, 3)
+    assert.equal(numbers[0].props.value, 120)
+    numbers[0].props.onChange({ target: { value: '90' } })
+    assert.deepEqual(patches[1], { approvalTimeoutMs: 90_000 })
+
+    // 协作工作区下拉：选到某个工作区时连带把路径填进去
+    const select = find(card, (n) => n.type === 'select')[0]
+    select.props.onChange({ target: { value: 'w2' } })
+    assert.deepEqual(patches[2], { collabWorkspaceId: 'w2', collabRoot: 'F:\\work\\b' })
+
+    // 保存按钮
+    const saveButton = find(card, (n) => n.type === 'button')[0]
+    saveButton.props.onClick()
+    assert.equal(saves, 1)
+
+    // 保存中：按钮禁用且改文案
+    const busyCard = BridgeSettingsCard({ ...{ workspaces: [], form, error: '', busy: 'save', saved: '', onPatch: () => {}, onSave: () => {} } })
+    const busyButton = find(busyCard, (n) => n.type === 'button')[0]
+    assert.equal(busyButton.props.disabled, true)
+    assert.match(flatten(busyCard).join(' '), /保存中/)
+  } finally {
+    delete globalThis.h
   }
 })
