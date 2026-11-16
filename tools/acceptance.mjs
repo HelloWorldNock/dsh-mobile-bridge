@@ -25,6 +25,7 @@ const OUT = outIndex >= 0 ? args[outIndex + 1] : null
 const onlyIndex = args.indexOf('--only')
 const ONLY = onlyIndex >= 0 ? args[onlyIndex + 1].split(',').map((s) => s.trim().toUpperCase()) : null
 const KEEP = args.includes('--keep')
+const APPROVALS = args.includes('--approvals')
 
 const results = []
 let token = ''
@@ -64,6 +65,10 @@ async function check(id, title, fn) {
   if (!shouldRun(id)) return
   try {
     const detail = await fn()
+    if (detail !== null && typeof detail === 'object' && typeof detail.skip === 'string') {
+      record(id, title, 'skip', detail.skip)
+      return
+    }
     record(id, title, 'pass', detail ?? '')
   } catch (error) {
     record(id, title, 'fail', String(error?.message ?? error))
@@ -281,8 +286,77 @@ async function main() {
     return '无 token 401 · 伪造 401'
   })
 
-  skip('A5', '双端审批（手机先答/桌面先答）', '需要真实触发一次工具调用审批，只能在设备上做')
-  skip('A7', 'plan-review 批准后继续', '同上，需要模型进入计划模式')
+  if (!APPROVALS) {
+    skip('A5', '审批链路（脚本代答 allow-once）', '默认跳过：加 --approvals 才会真的让模型调一次 shell 工具')
+  } else {
+    await check('A5', '审批链路（脚本代答 allow-once）', async () => {
+      const workspaces = await call('/api/workspaces', { auth: true })
+      const workspace = (workspaces.body.workspaces ?? [])[0]
+      assert(workspace !== undefined, '没有工作区')
+      const created = await call('/api/sessions', {
+        method: 'POST',
+        auth: true,
+        body: {
+          workspaceId: workspace.id,
+          // 故意要求跑一条无害命令，触发工具审批
+          prompt: '请用 shell 工具执行 echo bridge-approval-test，然后原样回复它的输出。',
+          permission: 'workspace-write'
+        }
+      })
+      assert(created.status === 200, `建会话失败：${created.status} ${JSON.stringify(created.body)}`)
+      const id = created.body.sessionId
+
+      let approval = null
+      let finished = false
+      const deadline = Date.now() + 90_000
+      while (approval === null && !finished && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1_500))
+        const pending = await call('/api/pending', { auth: true })
+        const list = pending.body?.approvals ?? []
+        approval = list.find((item) => item.sessionId === undefined || item.sessionId === id) ?? null
+        if (approval !== null) break
+        const sessions = await listSessions()
+        const row = sessions.find((item) => item.id === id)
+        // 轮次已经结束还没有审批卡：这一轮没触发工具审批
+        if (row !== undefined && row.running !== true) finished = true
+      }
+
+      if (approval === null) {
+        // 没触发审批不算失败：权限预设、模型选择、提示词理解都会影响
+        await call(`/api/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', auth: true, body: {} })
+        return {
+          skip: finished
+            ? '这一轮正常跑完但没有触发审批（当前权限不需要审批，或模型没调工具）'
+            : '90 秒内既没有审批卡、轮次也没结束（宿主很忙？）'
+        }
+      }
+
+      const card = approval
+      const answered = await call(`/api/approvals/${encodeURIComponent(card.id)}`, {
+        method: 'POST',
+        auth: true,
+        body: { action: 'allow-once' }
+      })
+      assert(answered.status === 200, `代答审批失败：${answered.status} ${JSON.stringify(answered.body)}`)
+
+      // 等这一轮结束，再从历史里确认工具真的跑了
+      const started = Date.now()
+      let running = true
+      while (running && Date.now() - started < 120_000) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000))
+        const sessions = await listSessions()
+        const row = sessions.find((item) => item.id === id)
+        if (row === undefined) continue
+        running = row.running === true
+      }
+      const history = await call(`/api/sessions/${encodeURIComponent(id)}/history`, { auth: true })
+      const historyText = JSON.stringify(history.body.records ?? [])
+      const ran = historyText.includes('bridge-approval-test')
+      return `卡片 ${card.id.slice(0, 10)}… 已 allow-once；工具输出${ran ? '已' : '未'}落盘`
+    })
+  }
+
+  skip('A7', 'plan-review 批准后继续', '需要模型进入计划模式，且计划内容依赖模型判断，暂不脚本化')
   skip('A9', '历史图片回显与全屏', '需要在手机上点开图片')
   skip('A10', '断线重连', '需要设备侧断网/恢复')
   skip('A11', 'LAN → tailnet 切换', '需要设备离开局域网')

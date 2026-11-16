@@ -16,7 +16,7 @@
 | R06 | README + contrib | ✅ | 7 条路由、0.8.6–0.9.x 能力、删 `resync`、Windows 权限描述、五级口径；`contrib/` 跟到最新发布版 |
 | R07 | 三处升版 + Note | ✅ | 每版 `package.json` / `index.js` / `build.gradle.kts` 一致，`docs/RELEASE-*.md` 齐 |
 | R08 | 正式发布 | ✅ | v0.8.9 → v0.9.8 共 10 个 Release，资产含 tgz / 三包 APK / tsnode / SHA256SUMS |
-| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（**13 项自动 + 9 项待真机**），报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md)：12 通过 / 1 失败（A8，运行中的 0.8.8 未重启）/ 9 跳过 |
+| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（**13 项自动 + 9 项待真机**；`--approvals` 可试跑审批链路，宿主没触发审批时如实记 skip），报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md)：12 通过 / 1 失败（A8，运行中的 0.8.8 未重启）/ 9 跳过 |
 | R10 | 最小 CI | ✅ | `.github/workflows/ci.yml`：`check.mjs` + `node --test` + 打包后过门禁 + `build-client --check` |
 
 ## 阶段二：可靠性强化（R11–R18）
@@ -54,7 +54,7 @@ bump → 打包 → 构建 → 哈希 → 四道门禁 → 提交/打 tag/推送
 
 ## 还没做完的三件事
 
-1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层，剩下的 A5/A7/A9–A12/A15/A18–A20 需要一台真机
+1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层（`--approvals` 还能试跑审批链路），剩下的 A7/A9–A12/A15/A18/A19 需要一台真机
    （审批点按、图片全屏、断网/切网、锁屏通知、NAT 发现、彻底删除）。
 2. **R26 发布私钥**：跑一次 `tools/make-keystore.ps1` 即可（密钥与口令由它生成并写进已 gitignore 的位置）；我这边的执行环境禁止创建 `.jks`，所以只能把链路和门禁做到「一条命令可用」。
 3. ~~R22 剩余~~：已完成（九个区块组件化）。
