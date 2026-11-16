@@ -20,7 +20,9 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '..')
-const STEPS = ['preflight', 'bump', 'pack', 'build-apk', 'sums', 'gates', 'commit', 'tag', 'push', 'release']
+const STEPS = ['preflight', 'bump', 'pack', 'build-apk', 'sums', 'pointers', 'gates', 'commit', 'tag', 'push', 'release']
+let previousVersion = null
+let previousCode = null
 
 function parseArgs(argv) {
   const out = { version: null, notes: null, dryRun: false, from: 'preflight', skipBuild: false, allowDirty: false }
@@ -121,11 +123,34 @@ function bump() {
   if (!shouldRun('bump')) return
   const manifest = readJson('host/package.json')
   const current = manifest.version
+  previousVersion = current
   const gradle = readFileSync(join(REPO, 'android/app/build.gradle.kts'), 'utf8')
   const codeMatch = gradle.match(/versionCode\s*=\s*(\d+)/)
   if (codeMatch === null) fail('build.gradle.kts 里找不到 versionCode')
+  previousCode = codeMatch[1]
   const nextCode = String(Number(codeMatch[1]) + 1)
   run(process.execPath, [join(REPO, 'tools/set-version.mjs'), current, args.version, codeMatch[1], nextCode])
+}
+
+// ---------------------------------------------------------------- pointers
+async function pointers() {
+  if (!shouldRun('pointers')) return
+  // --from pointers 续跑时，previousVersion 还没被赋过值：从 git 里取上一个版本
+  if (previousVersion === null) {
+    const tag = run('git', ['describe', '--tags', '--abbrev=0', 'HEAD'], { allowFail: true })
+    const fromTag = (tag.stdout ?? '').trim().replace(/^v/, '')
+    if (/^\d+\.\d+\.\d+$/.test(fromTag) && fromTag !== args.version) previousVersion = fromTag
+  }
+  if (previousVersion === null) {
+    log('跳过 pointers：拿不到上一个版本号（手动跑 tools/pointers.mjs <旧> <新> 即可）')
+    return
+  }
+  const { updatePointers } = await import('./pointers.mjs')
+  if (args.dryRun) {
+    log(`(dry) 把 README/contrib/ROADMAP 里的 ${previousVersion} 引用改成 ${args.version}`)
+    return
+  }
+  updatePointers({ from: previousVersion, to: args.version, codeFrom: previousCode, codeTo: null, quiet: false })
 }
 
 // ---------------------------------------------------------------- pack
@@ -256,6 +281,7 @@ bump()
 pack()
 buildApk()
 sums()
+await pointers()
 gates()
 commitAndTag()
 push()

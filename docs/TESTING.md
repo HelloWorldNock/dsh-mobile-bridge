@@ -83,7 +83,15 @@ L2；Keystore 加密与网络策略 L1 + 可构建；端到端主链路仍缺一
 
 ## 4. 发版动作清单
 
-**一条命令**（推荐）：
+**全部自动门禁一条命令**（推荐每天/每次改动后跑）：
+
+```powershell
+node tools/gates.mjs              # G01/G02/G03/G05/G12 自动跑；G06/G09/G10/G11 标「需人工」
+node tools/gates.mjs --with-build # 额外跑 G04（Android 构建，约 1–2 分钟）
+node tools/gates.mjs --json       # 机器可读结果
+```
+
+**发版一条命令**：
 
 ```powershell
 node tools/release.mjs --version <v> --notes docs/RELEASE-<v>.md --dry-run   # 先看计划

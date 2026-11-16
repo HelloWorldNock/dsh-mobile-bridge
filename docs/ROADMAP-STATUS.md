@@ -2,7 +2,7 @@
 
 > 这份表是「路线走到哪」的唯一索引：每一项给出**证据位置**与**层级口径**
 > （L1 已实现 / L2 已单测 / L3 已集成 / L4 已真机 / L5 已交付，定义见 [`TESTING.md`](TESTING.md)）。
-> 最近更新：0.9.14。
+> 最近更新：0.9.15。
 
 ## 阶段一：交付收口（R01–R10）
 
@@ -50,7 +50,7 @@
 
 `node tools/release.mjs --version <v> --notes docs/RELEASE-<v>.md` 一条命令跑完
 bump → 打包 → 构建 → 哈希 → 四道门禁 → 提交/打 tag/推送 → GitHub Release；
-`--dry-run` 只看计划，`--from <step>` 断点续跑。v0.9.15 本身就是用它发的。
+`--dry-run` 只看计划，`--from <step>` 断点续跑；流程里含 `pointers` 一步（把 README/contrib/ROADMAP 的版本引用一并改掉）。v0.9.15 本身就是用它发的。
 
 ## 需要仓库主人做的两件事（当前唯一阻塞）
 
@@ -107,6 +107,6 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 host      : 27 模块 / 181 例（180 过 + 1 集成用例默认跳过）
 android   : 55 例
 门禁      : verify-package PASS（38 文件 / 26 个 lib/** 同哈希，版本三处一致）
-构建      : assembleDebug / assembleRelease 均成功（versionCode 35，ABI 三包）
-发布      : 最新 v0.9.14（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
+构建      : assembleDebug / assembleRelease 均成功（versionCode 36，ABI 三包）
+发布      : 最新 v0.9.15（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
 ```
