@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  明文（http）策略。
+
+  桥接不带 TLS：局域网和 tailnet 里就是明文 HTTP，加密由 Tailscale 的 WireGuard 隧道
+  提供。Android 的网络安全配置只能按**域名逐条**声明放行，表达不了「RFC1918 整段」，
+  所以这里保留 base cleartext 放行（否则连 192.168.x.x 都连不上），
+  「公网地址/公网域名禁止明文」由应用层的 com.ts7.dshremote.data.NetworkPolicy 兜住：
+
+    - 私网字面量（10/8、172.16/12、192.168/16、100.64/10、127/8、169.254/16）、
+      IPv6 回环/链路本地/唯一本地、单标签主机名、*.local/*.lan/*.home.arpa 等内网后缀
+      → 允许 http
+    - 其它公网 IP 或公网域名 → 必须 https，否则 BridgeClient 构造时直接拒绝
+      （错误码 network/cleartext-blocked，UI 显示原因）
+
+  改动这张表时同步改 NetworkPolicy.kt 与 README 的「安全模型」。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

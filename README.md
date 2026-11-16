@@ -21,6 +21,7 @@
 - 计划审阅保卡：断线重连后未处理的 plan-review 卡片不会被清空，重连继续显示（0.8.7 起）
 - 归档与取消归档：手机可以直接归档任务，归档后任务从双端列表消失但日志保留；被电脑归档时这个任务会留在手机当前任务里，菜单变成「取消归档」直接放回来（0.8.9 起）
 - DSH 0.2.x 适配：面板挂在侧栏与「设置 → 插件」，异步 `resolveByPath`、`durable parent`、`subagentAddress`、`settings.plugins.tab` 与 `dto.reason` 都跟宿主 0.2.x 对齐，子代理会话能正常打开（0.8.8 起）
+- 宿主兼容性自检：DSH 启动时把桥接依赖的宿主接口（`sessionController` / `workspaceRegistry` / 审批 waterfall / `ctx.get` 的可选服务）逐个点一遍，结果写运行日志并在面板顶部给横幅；缺必需接口时写「主链路不可用」，只缺可选服务时写降级项和影响（0.9.0 起）
 - 选择与复制：消息气泡支持长按选中（系统选择手柄、复制/全选），菜单里多了「复制整段对话」，按 `[我]` / `[DSH]` / `· 工具` 分段输出纯文本
 - 权限审批：手机和桌面端**同时**弹出审批卡；哪一端先处理，就以那一端的结果为准，另一端的卡片随即消失（桌面端由 host 主动下发 cancel 帧撤卡）
 - 计划审阅：plan-review 卡片展示完整计划，批准后退出计划模式并继续执行
@@ -294,7 +295,7 @@ npm run check
 npm test
 ```
 
-当前 101 个 host 测试全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话（`sessionId` 续跑、cwd 归位工作区、派发失败清理空会话）、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、归档会话过滤与工作区分组剔除、归档/取消归档接口与运行中拒绝、归档集合变化到 `session.removed`/`session.added` 的换算、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界（含派活不能越出协作工作区）、协作工作区配置（相对路径拒绝）、协作工作区下的文件列举与越界拒绝、组内委派（workspaceId 优先、cwd 回退、续跑、并发权限、缺失时报错）。
+当前 113 个 host 测试（13 个文件）全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话（`sessionId` 续跑、cwd 归位工作区、派发失败清理空会话）、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、归档会话过滤与工作区分组剔除、归档/取消归档接口与运行中拒绝、归档集合变化到 `session.removed`/`session.added` 的换算、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界（含派活不能越出协作工作区）、协作工作区配置（相对路径拒绝）、协作工作区下的文件列举与越界拒绝、组内委派（workspaceId 优先、cwd 回退、续跑、并发权限、缺失时报错）、宿主兼容性探针（齐全/缺必需接口/签名漂移/同步 resolveByPath 降级/空 ctx）、全部设备路由的缺 token 与伪造 token 401、`/api/group/hello` 只认组密钥不收设备 token、无绑定组时 503。
 
 MuMu 端到端已验证（0.8.7 一轮）：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI、Q 版图标、过滤后的任务列表和 DSH 侧栏控制面板都实际跑过。**0.8.9 这一轮的归档/取消归档、`/api/logs`、0.2.x 适配尚未在同一台真机上重跑**，见下一节的层级口径。
 
@@ -365,12 +366,13 @@ SSE 事件：`hello`、`session.snapshot`、`session.event`、`assistant.delta`�
 - 桥接绑定 `0.0.0.0`，不做公网端口映射或中继；远程访问只依赖 Tailscale 的 WireGuard 加密隧道，应用层仍是明文 HTTP。
 - token 是 `dshm_` + 32 字节随机数，服务端只存 SHA-256；撤销后立即失效。
 - 绑定组密钥是 `dshg_` + 32 字节随机数，同样只存 SHA-256；它只能用于组内握手和组内协作，可以调手机版内容 API，但读不到 `/api/events`、也不算「手机在线」。邀请码一次性、5 分钟过期、单码 5 次失败。
+- `/api/group/hello` 不是公开接口：必须带 `Bearer dshg_...`（组密钥），未带或错误一律 401；已配对的设备 token（`dshm_...`）不能代替组密钥；本机没有绑定组时返回 503 `group/unavailable`。它与 `/api/group/join`（用一次性邀请码换组密钥，公开）是两回事。
 - `/api/collab/file(s)` 只读指定协作工作区内部（`..`、绝对路径、目录外软链一律 403），单次最多 200 个文件、64 MB。
 - 配对码 120 秒、单码 5 次失败、单 IP 每分钟 10 次。
 - 面板的 `/api/setup/*` 只允许 loopback；DSH 页面跨端口访问时校验 Origin，并保留 CSRF。
 - 状态文件：`$DSH_HOME/storages/mobile-bridge/state.json`，原子写，先写临时文件再改名；POSIX 下再 `chmod 600`。Windows 不认 POSIX 权限位（`chmod` 在那里是空操作），实际保护来自用户目录的 ACL——`%USERPROFILE%\.dsh` 默认只有本机当前用户可读，别把这个目录放进共享盘或漫游配置。
 - 手机的 token 目前明文存在 SharedPreferences（Keystore 加密未实现）；不要 root 手机或共享备份。
-- App 开启 `usesCleartextTraffic`：局域网里是明文 HTTP；Tailscale 隧道本身加密，但应用层没有额外 TLS。
+- App 的明文（http）只对私网放行：`NetworkPolicy` 在建立连接前判定主机——私网字面量（`10/8`、`172.16/12`、`192.168/16`、`100.64/10`、`127/8`、`169.254/16`）、IPv6 回环/链路本地/唯一本地、单标签主机名与 `*.local` / `*.lan` / `*.home.arpa` 等内网后缀允许 http；公网 IP 或公网域名必须 https，否则直接拒绝并提示（错误码 `network/cleartext-blocked`）。`res/xml/network_security_config.xml` 记录了这条策略为何不能只用系统配置表达（Android 的网络安全配置只能按域名逐条声明，表达不了整段私网）。
 
 ## 已知限制
 

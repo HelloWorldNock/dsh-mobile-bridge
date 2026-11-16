@@ -246,7 +246,7 @@ function toEpochMillis(value) {
   return undefined
 }
 
-export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null, updater = null, logs = null }) {
+export function createBridgeServer({ config, state, auth, broadcast, hub, approvals, settings, logger, version, ctx, onDiscoveryChange, tailscale = null, group = null, updater = null, logs = null, compatibility = null }) {
   const csrf = randomBytes(24).toString('base64url')
   let server = null
 
@@ -597,6 +597,8 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
       version,
       group: group?.snapshot?.() ?? { group: null, peers: [], invite: null },
       update: updater?.snapshot?.() ?? null,
+      // 面板据此显示降级横幅：宿主接口不兼容时主链路仍是坏的，不能只写日志。
+      compatibility: compatibility ?? null,
       collabRoot: collabRoot(),
       collabWorkspaceId: collabWorkspace()?.id ?? null,
       logs: logs
@@ -628,7 +630,8 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
         待审批: pending.approvals.length,
         待回答: pending.questions.length,
         Node: process.version,
-        平台: `${process.platform}/${process.arch}`
+        平台: `${process.platform}/${process.arch}`,
+        宿主兼容性: compatibility?.summary ?? '(未检查)'
       },
       lines
     })

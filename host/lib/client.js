@@ -193,6 +193,40 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       )
     }
 
+    /**
+     * 宿主兼容性横幅。探针在 DSH 启动时跑一次，结果随 /api/setup/state 下发：
+     * ok=false 说明必需接口缺失/签名变了，主链路是坏的；只有 warnings 说明是降级。
+     */
+    function compatNotice(snap) {
+      const compat = snap && snap.compatibility ? snap.compatibility : null
+      if (compat === null) return null
+      const problems = Array.isArray(compat.problems) ? compat.problems : []
+      const warnings = Array.isArray(compat.warnings) ? compat.warnings : []
+      const fatal = compat.ok !== true
+      if (!fatal && warnings.length === 0) return null
+      const lines = fatal ? problems : warnings
+      return h(
+        "div",
+        { className: "dmb-alert" },
+        h("div", { style: { fontWeight: 600, marginBottom: 4 } }, fatal ? "宿主接口不兼容，部分功能不可用" : "宿主接口有降级"),
+        h("div", null, String(compat.summary || "")),
+        lines.length > 0
+          ? h(
+              "ul",
+              { style: { margin: "6px 0 0", paddingLeft: 18, lineHeight: 1.5 } },
+              lines.map((line, index) => h("li", { key: index }, String(line))),
+            )
+          : null,
+        h(
+          "div",
+          { style: { marginTop: 6, opacity: 0.8 } },
+          fatal
+            ? "手机端的任务/审批等功能会跟着失效。换回与该桥接版本匹配的 DSH，或升级桥接后重启桌面端。"
+            : "主链路仍可用；上面这些功能会缺。完整清单见「运行日志」，重启 DSH 会重新检查。",
+        ),
+      )
+    }
+
     function PanelBody({ embedded, onClose }) {
       const [snap, setSnap] = useState(null)
       const [form, setForm] = useState(null)
@@ -402,6 +436,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
           ),
           error ? h("div", { className: "dmb-alert" }, `${error}。DSH 里的桥接服务没有响应，重启桌面端后再看这里。`) : null,
           otherError ? h("div", { className: "dmb-alert" }, otherError) : null,
+          snap ? compatNotice(snap) : null,
           snap
             ? h(
                 "div",

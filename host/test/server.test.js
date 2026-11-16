@@ -162,7 +162,7 @@ async function boot(options = {}) {
     ctx,
     logs: options.logs ?? null,
     tailscale: options.tailscale ?? null,
-    group,
+    group: options.group === false ? null : group,
     updater: options.updater ?? null
   })
   const port = await server.listen()
@@ -1127,5 +1127,130 @@ test('exports the run log to the panel and to a paired phone', async () => {
   } finally {
     await app.close()
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/**
+ * R11 探针之外的另一个「静默坏掉」入口：鉴权分层如果没人守，坏掉也不会报错。
+ * 这里按 README 的分层逐个点：设备 token 能过的路由，缺 token 必须 401；
+ * 组密钥只放行它该放行的，`/api/group/hello` 不接受设备 token。
+ */
+test('every device route rejects a missing token', async () => {
+  const app = await boot()
+  const routes = [
+    ['GET', '/api/info'],
+    ['GET', '/api/logs'],
+    ['GET', '/api/workspaces'],
+    ['POST', '/api/workspaces'],
+    ['GET', '/api/group'],
+    ['POST', '/api/group/invite'],
+    ['POST', '/api/group/link'],
+    ['GET', '/api/collab/files?cwd=F%3A%5Cwork'],
+    ['GET', '/api/collab/file?cwd=F%3A%5Cwork&path=a.txt'],
+    ['GET', '/api/permission-presets'],
+    ['GET', '/api/sessions'],
+    ['POST', '/api/sessions'],
+    ['GET', '/api/sessions/s1'],
+    ['DELETE', '/api/sessions/s1'],
+    ['POST', '/api/sessions/s1/archive'],
+    ['POST', '/api/sessions/s1/unarchive'],
+    ['GET', '/api/sessions/s1/history'],
+    ['GET', '/api/sessions/s1/images/1/0'],
+    ['POST', '/api/sessions/s1/prompt'],
+    ['POST', '/api/sessions/s1/cancel'],
+    ['POST', '/api/sessions/s1/rename'],
+    ['POST', '/api/sessions/s1/permission'],
+    ['POST', '/api/sessions/s1/plan'],
+    ['POST', '/api/subscribe'],
+    ['POST', '/api/unsubscribe'],
+    ['GET', '/api/pending'],
+    ['POST', '/api/approvals/ap_x'],
+    ['POST', '/api/questions/q_x'],
+    ['GET', '/api/events']
+  ]
+  try {
+    for (const [method, path] of routes) {
+      const anonymous = await fetch(`${app.base}${path}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: method === 'GET' ? undefined : '{}'
+      })
+      assert.equal(anonymous.status, 401, `${method} ${path} 缺 token 时应当 401`)
+
+      const forged = await fetch(`${app.base}${path}`, {
+        method,
+        headers: { authorization: 'Bearer dshm_not-a-real-token', 'content-type': 'application/json' },
+        body: method === 'GET' ? undefined : '{}'
+      })
+      assert.equal(forged.status, 401, `${method} ${path} 用伪造 token 时应当 401`)
+    }
+  } finally {
+    await app.close()
+  }
+})
+
+test('group/hello accepts only the group secret, never a device token', async () => {
+  const app = await boot()
+  try {
+    const setup = await (await fetch(`${app.base}/api/setup/state`)).json()
+    const created = await fetch(`${app.base}/api/setup/group`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-dsh-csrf': setup.csrf },
+      body: JSON.stringify({ action: 'create', name: '设计组' })
+    })
+    assert.equal(created.status, 200)
+    const secret = app.state.group.secret
+
+    const anonymous = await fetch(`${app.base}/api/group/hello`, { method: 'POST' })
+    assert.equal(anonymous.status, 401)
+    assert.equal((await anonymous.json()).error.code, 'auth/unauthorized')
+
+    // 设备 token 与组密钥是两套凭据：配对过的手机也不能拿 dshm_ 当组密钥。
+    const withDeviceToken = await fetch(`${app.base}/api/group/hello`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${app.token}` }
+    })
+    assert.equal(withDeviceToken.status, 401)
+
+    const wrongSecret = await fetch(`${app.base}/api/group/hello`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer dshg_wrong' }
+    })
+    assert.equal(wrongSecret.status, 401)
+
+    const ok = await fetch(`${app.base}/api/group/hello`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${secret}` }
+    })
+    const body = await ok.json()
+    assert.equal(ok.status, 200)
+    assert.equal(body.groupId, app.state.group.id)
+    assert.equal(body.deviceId, app.state.deviceId)
+    assert.equal(typeof body.port, 'number')
+    assert.ok(Array.isArray(body.peers))
+    assert.equal(JSON.stringify(body).includes(secret), false)
+  } finally {
+    await app.close()
+  }
+})
+
+test('group routes report 503 when the host has no binding group', async () => {
+  const app = await boot({ group: false })
+  try {
+    const hello = await fetch(`${app.base}/api/group/hello`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer dshg_whatever' }
+    })
+    assert.equal(hello.status, 503)
+    assert.equal((await hello.json()).error.code, 'group/unavailable')
+
+    const join = await fetch(`${app.base}/api/group/join`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: '123456' })
+    })
+    assert.equal(join.status, 503)
+  } finally {
+    await app.close()
   }
 })

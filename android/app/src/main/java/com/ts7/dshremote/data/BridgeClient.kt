@@ -47,6 +47,12 @@ class BridgeClient(
 ) {
     val baseUrl: String = normalizeBaseUrl(rawBaseUrl)
 
+    init {
+        // 明文白名单在这里兜底：BridgeClient 的每个实例都对应一个真实地址，
+        // 公网域名/公网 IP 走 http 时直接拒绝，别等 token 发出去才发现。
+        NetworkPolicy.check(baseUrl)?.let { reason -> throw ApiException(NetworkPolicy.BLOCKED_CODE, reason) }
+    }
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(timeoutMs ?: 6_000L, TimeUnit.MILLISECONDS)
         .readTimeout(timeoutMs ?: 0L, TimeUnit.MILLISECONDS)

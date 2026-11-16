@@ -63,6 +63,11 @@ function sha256(buffer) {
   return createHash('sha256').update(buffer).digest('hex')
 }
 
+/** 读文本时去掉 UTF-8 BOM：Windows 编辑器很容易加上，JSON.parse 会直接崩。 */
+function stripBom(text) {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+}
+
 /** 极简 tar 读取：够读 npm pack 产物（ustar + pax 路径覆盖），不处理稀疏文件与硬链接。 */
 function readTar(buffer) {
   const entries = new Map()

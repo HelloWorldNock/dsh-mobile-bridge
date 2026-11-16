@@ -11,11 +11,12 @@ import { createCollab } from './collab.js'
 import { createUpdater } from './update.js'
 import { createCollabTool, registerCollabTool } from './tool.js'
 import { createLogSink, wrapLogger, startLogTee } from './logs.js'
+import { checkHostCompatibility, logCompatibility } from './compatibility-check.js'
 
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.8.9'
+const VERSION = '0.9.0'
 // 超时默认值不在这里重复定义——见 state.js 的 TIMEOUT_DEFAULTS（120/120/180 s），
 // 配置里传了非法值时回落到同一组数，避免「面板显示 120 s、实际按 30 s 跑」这类偏差。
 const DEFAULTS = {
@@ -41,6 +42,11 @@ export function apply(ctx, config) {
   const logs = createLogSink()
   const logger = wrapLogger(ctx.logger ?? console, logs)
   const stopTee = startLogTee(logs)
+
+  // 宿主升级最容易坏在「方法还在但签名变了」这类静默问题上：
+  // 启动时点一遍接口，结果同时进运行日志和面板（/api/setup/state 的 compatibility）。
+  const compatibility = checkHostCompatibility(ctx, { version: VERSION })
+  logCompatibility(compatibility, logger)
   const cfg = {
     port: positivePort(raw.port, DEFAULTS.port),
     discoveryPort: positivePort(raw.discoveryPort, DEFAULTS.discoveryPort),
@@ -166,6 +172,7 @@ export function apply(ctx, config) {
       version: VERSION,
       ctx,
       logs,
+      compatibility,
       onDiscoveryChange: syncDiscovery,
       tailscale,
       group,
