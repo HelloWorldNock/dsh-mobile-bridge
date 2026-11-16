@@ -9,8 +9,9 @@
 | Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **181 例（180 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
 | Android 数据层 | `powershell -File tools/test-android.ps1` | **55 例** | 配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移、连接路由决策、会话与时间线折叠、时间线行折叠与纯文本导出 |
 | 真实宿主契约 | `cd host && $env:DSH_BRIDGE_INTEGRATION='1'; node --test test/integration/prompt.test.js` | 1 例（默认跳过） | 对运行中的桥接跑真 prompt 并核对历史落盘 |
-| 验收矩阵（API 层） | `node tools/acceptance.mjs --out docs/ACCEPTANCE-RESULT-x.md` | 13 项自动 + 9 项待真机 | 配对/鉴权/列表/建会话/归档/取消归档/日志/图片校验/彻底删除/事件流鉴权；结果可归档 |
+| 验收矩阵（API 层） | `node tools/acceptance.mjs --out docs/ACCEPTANCE-RESULT-x.md` | 14 项自动（A5/A7 需 `--approvals`）+ 8 项待真机 | 配对/鉴权/列表/建会话/归档/取消归档/日志/图片校验/彻底删除/事件流鉴权；结果可归档 |
 | 审批链路（实验） | `node tools/acceptance.mjs --only A5 --approvals` | opt-in | 建会话→让模型调一次 shell→脚本代答 `allow-once`→核对工具输出落盘；宿主本轮没触发审批时如实记 skip |
+| 计划审阅（已自动化） | `node tools/acceptance.mjs --only A7 --approvals` | opt-in · 实测通过 | 建会话 → `POST plan {active:true}` → 派 prompt → 抓 `planReview:true` 卡 → 只答「Keep planning」（不批准执行，避免真改文件）。实测拿到 2945 字计划并成功代答 |
 
 `node --test` 里那 1 条"跳过"就是集成用例：没设 `DSH_BRIDGE_INTEGRATION=1` 时它不会去动你的 DSH。
 

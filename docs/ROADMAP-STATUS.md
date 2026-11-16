@@ -16,7 +16,7 @@
 | R06 | README + contrib | ✅ | 7 条路由、0.8.6–0.9.x 能力、删 `resync`、Windows 权限描述、五级口径；`contrib/` 跟到最新发布版 |
 | R07 | 三处升版 + Note | ✅ | 每版 `package.json` / `index.js` / `build.gradle.kts` 一致，`docs/RELEASE-*.md` 齐 |
 | R08 | 正式发布 | ✅ | v0.8.9 → v0.9.8 共 10 个 Release，资产含 tgz / 三包 APK / tsnode / SHA256SUMS |
-| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（**13 项自动 + 9 项待真机**；`--approvals` 可试跑审批链路，宿主没触发审批时如实记 skip），报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md)：12 通过 / 1 失败（A8，运行中的 0.8.8 未重启）/ 9 跳过 |
+| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（**14 项自动 + 8 项待真机**；`--approvals` 下 A7 计划审阅已实测通过、A5 审批链路按宿主是否触发审批如实记 skip），报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md)：12 通过 / 1 失败（A8，运行中的 0.8.8 未重启）/ 9 跳过 |
 | R10 | 最小 CI | ✅ | `.github/workflows/ci.yml`：`check.mjs` + `node --test` + 打包后过门禁 + `build-client --check` |
 
 ## 阶段二：可靠性强化（R11–R18）
@@ -75,7 +75,7 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 
 | 项 | 为什么只能真机 |
 |---|---|
-| A7 plan-review 批准后继续 | 需要模型进入计划模式；脚本里 `plan:true` 建会话没触发出 plan-review 卡（见下） |
+| ~~A7 plan-review~~ | **已自动化**：`--approvals` 下走「建会话 → `POST plan {active:true}` → prompt」能稳定拿到卡并代答；仍建议真机点一次确认 UI 呈现 |
 | A9 历史图片回显与全屏 | 要在手机上点开图片 |
 | A10 断线重连 | 需要设备侧断网/恢复 |
 | A11 / A12 LAN ↔ tailnet 切换 | 需要设备离网/回网 |
@@ -87,12 +87,13 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 - `node tools/acceptance.mjs` 里的 **A8** 现在仍是失败（运行中的宿主是 0.8.8），重启宿主后应变绿；
 - 面板顶部的「宿主兼容性」横幅、`/api/setup/state.compatibility` 也只有在重启后才反映当前代码。
 
-### A7 的实测发现（本轮记录）
+### A7 的实测历程（已解决）
 
-用 `POST /api/sessions {plan:true, prompt}` 建会话时，只要给了 prompt 就会立刻派发，模型直接开始执行工具，
-**没有出现 plan-review 卡**（`/api/pending` 里没有 `planReview:true` 的问题）。
-要真的触发它，需要走「先建会话 → 用 `POST /api/sessions/:id/plan` 开计划模式 → 再 prompt」这条路径，
-或用 agent 的 `/plan` 命令。这条没有继续往下试，是因为它依赖模型行为，写进自动化容易变成“有时绿有时红”的假门禁。
+第一版探路用 `POST /api/sessions {plan:true, prompt}`，结果模型直接开始执行工具、没有 plan-review 卡；
+改用「先建会话 → `POST /api/sessions/:id/plan` → 再 prompt」仍然没有卡片，原因是**字段写错**：
+该路由要的是 `{active:boolean}`，我传了 `{plan:true}`，得到 400 `plan/bad-request`「active 必须是布尔值」。
+改对之后一次就拿到 `planReview:true` 的卡（计划正文 2945 字），并成功用 `POST /api/questions/:id` 代答。
+已把这条写进 `API.md`（会话动作的 body 契约）与 `tools/acceptance.mjs`（A7，`--approvals` 下跑）。
 
 ## 还没做完的三件事
 

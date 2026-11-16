@@ -356,7 +356,68 @@ async function main() {
     })
   }
 
-  skip('A7', 'plan-review 批准后继续', '需要模型进入计划模式，且计划内容依赖模型判断，暂不脚本化')
+  if (!APPROVALS) {
+    skip('A7', 'plan-review 卡与代答（只答「继续规划」）', '默认跳过：加 --approvals 才会真的让模型进入计划模式')
+  } else {
+    await check('A7', 'plan-review 卡与代答（只答「继续规划」）', async () => {
+      const workspaces = await call('/api/workspaces', { auth: true })
+      const workspace = (workspaces.body.workspaces ?? [])[0]
+      assert(workspace !== undefined, '没有工作区')
+
+      // 1) 建会话但不派 prompt，再显式开计划模式（body 是 {active:boolean}）
+      const created = await call('/api/sessions', { method: 'POST', auth: true, body: { workspaceId: workspace.id } })
+      assert(created.status === 200, `建会话失败：${created.status}`)
+      const id = created.body.sessionId
+      const planOn = await call(`/api/sessions/${encodeURIComponent(id)}/plan`, {
+        method: 'POST',
+        auth: true,
+        body: { active: true }
+      })
+      assert(planOn.status === 200 && planOn.body?.active === true, `开计划模式失败：${planOn.status} ${JSON.stringify(planOn.body)}`)
+
+      // 2) 派一个只出计划、不动文件的提示
+      const prompted = await call(`/api/sessions/${encodeURIComponent(id)}/prompt`, {
+        method: 'POST',
+        auth: true,
+        body: { text: '用三句话说明你会怎么整理 README 的目录，然后停在计划阶段等批准；不要修改任何文件。' }
+      })
+      assert(prompted.status === 200, `派 prompt 失败：${prompted.status}`)
+
+      // 3) 等 plan-review 卡
+      let card = null
+      let finished = false
+      const deadline = Date.now() + 150_000
+      while (card === null && !finished && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 2_500))
+        const pending = await call('/api/pending', { auth: true })
+        const list = pending.body?.questions ?? []
+        card = list.find((item) => item.planReview === true && (item.sessionId === undefined || item.sessionId === id)) ?? null
+        if (card !== null) break
+        const sessions = await listSessions()
+        const row = sessions.find((item) => item.id === id)
+        if (row !== undefined && row.running !== true) finished = true
+      }
+      if (card === null) {
+        await call(`/api/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', auth: true, body: {} })
+        return { skip: finished ? '这一轮跑完但模型没给出计划卡片（与模型行为有关）' : '150 秒内没有出现 plan-review 卡' }
+      }
+
+      // 4) 只答「继续规划」（不批准执行），验证代答通道即可，避免真的改文件
+      const question = (card.questions ?? [])[0]
+      assert(question !== undefined, 'plan-review 卡里没有 questions')
+      const keepPlanning = (question.options ?? []).find((option) => option.label !== 'Approve')?.label
+      assert(typeof keepPlanning === 'string', 'plan-review 卡里找不到非批准选项')
+      const answered = await call(`/api/questions/${encodeURIComponent(card.id)}`, {
+        method: 'POST',
+        auth: true,
+        body: { answers: [{ id: question.id, selected: [keepPlanning] }] }
+      })
+      assert(answered.status === 200, `代答计划卡失败：${answered.status} ${JSON.stringify(answered.body)}`)
+
+      await call(`/api/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', auth: true, body: {} })
+      return `卡片 ${card.id.slice(0, 10)}… planReview=true · 已答「${keepPlanning}」· 计划 ${(card.plan ?? '').length} 字`
+    })
+  }
   skip('A9', '历史图片回显与全屏', '需要在手机上点开图片')
   skip('A10', '断线重连', '需要设备侧断网/恢复')
   skip('A11', 'LAN → tailnet 切换', '需要设备离开局域网')

@@ -60,7 +60,11 @@
 | POST | `/api/sessions/:id/archive` \| `/unarchive` | 与桌面端共用归档集合；运行中 409 |
 | GET | `/api/sessions/:id/history?beforeSeq&maxMessages` | 分页历史 |
 | GET | `/api/sessions/:id/images/:seq/:index` | 历史图片原始字节 |
-| POST | `/api/sessions/:id/{prompt,cancel,rename,permission,plan}` | 会话动作 |
+| POST | `/api/sessions/:id/prompt` | `{text, images?}` · `session/prompt-failed` |
+| POST | `/api/sessions/:id/cancel` | 空 body |
+| POST | `/api/sessions/:id/rename` | `{title}` |
+| POST | `/api/sessions/:id/permission` | `{value}`（取值见 `/api/permission-presets`） |
+| POST | `/api/sessions/:id/plan` | **`{active:boolean}`**（不是 `{plan:true}`；用错字段返回 `plan/bad-request` 400「active 必须是布尔值」）→ `{active,status}` |
 | POST | `/api/subscribe` \| `/api/unsubscribe` | `{sessionId}` 订阅流 |
 | GET | `/api/pending` | `{approvals:[...], questions:[...]}` |
 | POST | `/api/approvals/:id` | `{action:'allow-once'\|'allow-always'\|'reject'}` |
