@@ -24,17 +24,20 @@ const SRC = join(HOST, 'client-src')
 const OUT = join(HOST, 'lib', 'client.js')
 const HELPERS_PLACEHOLDER = '/* __CLIENT_HELPERS__ */'
 const COMPONENTS_PLACEHOLDER = '/* __CLIENT_COMPONENTS__ */'
+const STYLES_PLACEHOLDER = '/* __CLIENT_STYLES__ */'
 
 /**
- * 内联 helpers 片段：
- * - 去掉文件头的说明性注释（那是给源码读者看的，bundle 里不需要）；
- * - 去掉 `export`，让函数成为 factory 作用域里的普通声明；
+ * 内联一个源码片段：
+ * - 从第一个 `export` 开始截（文件头的说明注释是给源码读者看的，bundle 里不需要）；
+ * - 去掉 `export `，让声明成为 factory 作用域里的普通声明（函数与常量都适用）；
  * - 每行补 4 空格缩进，和 factory 内部层级一致。
  */
-function inlineHelpers(source) {
-  const body = source.slice(source.indexOf('export function'))
+function inlineFragment(source) {
+  // 用「行首 export」定位，不要 indexOf('export ')：注释里可能出现 "去掉 `export ` 关键字" 这种字样。
+  const first = source.match(/^\s*export\s/m)
+  const body = first === null ? source : source.slice(first.index)
   return body
-    .replace(/^export\s+function\s+/gm, 'function ')
+    .replace(/^\s*export\s+/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .split('\n')
     .map((line) => (line.trim() === '' ? '' : `    ${line}`))
@@ -43,17 +46,19 @@ function inlineHelpers(source) {
 }
 
 export async function build({ check = false } = {}) {
-  const [panel, helpers, components] = await Promise.all([
+  const [panel, styles, helpers, components] = await Promise.all([
     readFile(join(SRC, 'panel.mjs'), 'utf8'),
+    readFile(join(SRC, 'styles.mjs'), 'utf8'),
     readFile(join(SRC, 'helpers.mjs'), 'utf8'),
     readFile(join(SRC, 'components.mjs'), 'utf8')
   ])
-  for (const placeholder of [HELPERS_PLACEHOLDER, COMPONENTS_PLACEHOLDER]) {
+  for (const placeholder of [STYLES_PLACEHOLDER, HELPERS_PLACEHOLDER, COMPONENTS_PLACEHOLDER]) {
     if (!panel.includes(placeholder)) throw new Error(`client-src/panel.mjs 里找不到占位符 ${placeholder}`)
   }
   const bundle = panel
-    .replace(HELPERS_PLACEHOLDER, inlineHelpers(helpers))
-    .replace(COMPONENTS_PLACEHOLDER, inlineHelpers(components))
+    .replace(STYLES_PLACEHOLDER, inlineFragment(styles))
+    .replace(HELPERS_PLACEHOLDER, inlineFragment(helpers))
+    .replace(COMPONENTS_PLACEHOLDER, inlineFragment(components))
   if (check) {
     const current = await readFile(OUT, 'utf8').catch(() => '')
     if (current !== bundle) {

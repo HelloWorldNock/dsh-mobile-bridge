@@ -181,6 +181,9 @@ test('leaf components only need h and their props', () => {
 
 test('the bundle still carries every panel entry point', () => {
   const code = readFileSync(BUNDLE, 'utf8')
+  // 样式片段（client-src/styles.mjs）也必须在 bundle 里
+  assert.ok(code.includes('const STYLE_ID = "dsh-mobile-bridge-client-css"'), 'bundle 里缺少 STYLE_ID')
+  assert.ok(code.includes('.dmb-panel{'), 'bundle 里缺少注入的样式')
   for (const name of [
     'function PhoneIcon',
     'function Status',
