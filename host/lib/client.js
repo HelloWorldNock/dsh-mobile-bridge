@@ -1,4 +1,4 @@
-/**
+﻿/**
  * dsh-mobile-bridge — DSH client panel.
  *
  * The PC-side control surface lives inside DSH instead of a standalone web
@@ -169,6 +169,7 @@ body[data-ds-dark-theme] .dmb-foot{color:#8B97AB}
       return { url: `${parsed.protocol}//${parsed.host}`, error: "" }
     }
 
+    /** 6 位配对码中间插两个空格，方便照着念。 */
     function formatCode(code) {
       const raw = String(code || "").replace(/\D/g, "")
       if (raw.length !== 6) return code || "------"

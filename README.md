@@ -262,7 +262,7 @@ cd <repo-root>\android; .\gradlew.bat :app:assembleDebug --no-daemon
 ## 测试
 
 ```powershell
-cd host; node scripts/check.mjs; node --test          # 159 例（含 1 条默认跳过的真实宿主用例）
+cd host; node scripts/check.mjs; node --test          # 164 例（含 1 条默认跳过的真实宿主用例）
 powershell -File tools/test-android.ps1               # Android 数据层 34 例
 node tools/verify-package.mjs                         # 包一致性门禁
 ```

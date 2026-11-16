@@ -1,4 +1,4 @@
-name: ci
+﻿name: ci
 
 on:
   push:
@@ -26,6 +26,11 @@ jobs:
 
       - name: unit tests
         run: node --test --test-reporter=spec
+
+      # 面板 bundle 由 client-src/ 片段生成；源码改了忘记重新生成会被这一步拦下。
+      - name: client bundle freshness
+        working-directory: .
+        run: node tools/build-client.mjs --check
 
   package:
     name: package consistency
