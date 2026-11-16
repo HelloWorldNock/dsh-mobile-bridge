@@ -2,7 +2,7 @@
 
 > 这份表是「路线走到哪」的唯一索引：每一项给出**证据位置**与**层级口径**
 > （L1 已实现 / L2 已单测 / L3 已集成 / L4 已真机 / L5 已交付，定义见 [`TESTING.md`](TESTING.md)）。
-> 最近更新：0.9.13。
+> 最近更新：0.9.14。
 
 ## 阶段一：交付收口（R01–R10）
 
@@ -39,7 +39,7 @@
 | R19 | 拆 `BridgeRepository.kt` | ✅ | 抽出 `KeyValueStore` / `PendingMerge` / `ReconnectPolicy` / `ConnectionRouter` / `SessionSyncManager`，仓库只剩副作用 |
 | R20 | 拆 `SessionScreen.kt` | ✅ | 1,084 → 585 行；`TimelineFormat`（纯逻辑）+ `SessionTimeline.kt` + `SessionDialogs.kt` |
 | R21 | 拆 `server.js` | ✅ | 1,438 → 738 行；`routes/{setup,workspaces,connections,sessions}.js` + `services/{prompt,format}.js` + `adapters/dsh/` |
-| R22 | 拆 `client.js` | ◐ 九刀 | `client-src/{styles,helpers,components}.mjs` + 生成器 `--check` + 渲染冒烟测试（`test/client-render.test.js`）+ `DevicesCard` / `LogCard` / `UpdateCard` / `BridgeSettingsCard` / `GroupCard` 已拆出（panel 1,160 → 760 行）；剩余：内嵌 Tailscale 节点一块 |
+| R22 | 拆 `client.js` | ✅ | `client-src/{styles,helpers,components}.mjs` + 生成器 `--check` + 渲染冒烟测试（`test/client-render.test.js`）+ 九个区块全部组件化（`DevicesCard` / `LogCard` / `UpdateCard` / `BridgeSettingsCard` / `GroupCard` / `TailscaleCard` 等），`panel.mjs` 1,160 → **626 行**；`client-src/` + 生成器 + 渲染测试（`client-bundle` / `client-render` / `client-tailscale`） |
 | R23 | `adapters/dsh/` 落地 | ✅ | 会话/工作区适配层，`server.js` 里 0 处直接摸宿主接口 |
 | R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、22 条路由、形状、12 类 SSE、60 个错误码 |
 | R25 | 文档单一事实源 | ✅ | [`API.md`](API.md) / [`INSTALL.md`](INSTALL.md) / [`TESTING.md`](TESTING.md) / [`SECURITY.md`](SECURITY.md) + README 文档地图 |
@@ -51,14 +51,14 @@
 1. **R09 真机矩阵**：`tools/acceptance.mjs` 覆盖了 API 层，剩下的 A5/A7/A9–A12/A15/A18–A20 需要一台真机
    （审批点按、图片全屏、断网/切网、锁屏通知、NAT 发现、彻底删除）。
 2. **R26 发布私钥**：跑一次 `tools/make-keystore.ps1` 即可（密钥与口令由它生成并写进已 gitignore 的位置）；我这边的执行环境禁止创建 `.jks`，所以只能把链路和门禁做到「一条命令可用」。
-3. **R22 剩余**：`PanelBody` 的区块切分（渲染冒烟测试已就位，可以安全推进）。
+3. ~~R22 剩余~~：已完成（九个区块组件化）。
 
 ## 当前质量基线（0.9.8）
 
 ```
-host      : 27 模块 / 179 例（178 过 + 1 集成用例默认跳过）
+host      : 27 模块 / 181 例（180 过 + 1 集成用例默认跳过）
 android   : 55 例
 门禁      : verify-package PASS（38 文件 / 26 个 lib/** 同哈希，版本三处一致）
-构建      : assembleDebug / assembleRelease 均成功（versionCode 34，ABI 三包）
-发布      : 最新 v0.9.13（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
+构建      : assembleDebug / assembleRelease 均成功（versionCode 35，ABI 三包）
+发布      : 最新 v0.9.14（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
 ```

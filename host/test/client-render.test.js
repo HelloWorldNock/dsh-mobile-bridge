@@ -1,7 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { BridgeSettingsCard, DevicesCard, GroupCard, LogCard, UpdateCard } from '../client-src/components.mjs'
+import {
+  BridgeSettingsCard,
+  DevicesCard,
+  GroupCard,
+  LogCard,
+  TailscaleCard,
+  UpdateCard
+} from '../client-src/components.mjs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 

@@ -385,3 +385,159 @@ export function GroupCard({ group, busy, error, saved, url, code, onUrlChange, o
     saved ? h("div", { className: "dmb-saved", style: { marginTop: 10 } }, saved) : null,
   )
 }
+
+/** 内嵌节点的状态文案与配色（展示用，跟宿主状态名一一对应）。 */
+export const TS_PHASE = {
+  off: "未启用",
+  starting: "启动中",
+  running: "已连接",
+  "needs-login": "待登录",
+  stopped: "已停止",
+  error: "出错",
+  unknown: "未知",
+  "binary-missing": "缺少节点程序"
+}
+
+export const TS_TONE = { running: "ok", starting: "warn", "needs-login": "warn", error: "bad", "binary-missing": "bad" }
+
+/**
+ * 内置 Tailscale 节点卡片（R22 第十刀）。
+ *
+ * 开关、节点名、状态目录、授权密钥、健康提示、IP/tailnet 胶囊、日志折叠都在这里；
+ * 所有写操作只派发回调（`onToggle` / `onHostCommit` / `onDirCommit` / `onKeySave` / `onRestart`），
+ * 组件本身不 fetch。
+ */
+export function TailscaleCard({
+  ts,
+  busy,
+  phase,
+  enabled,
+  host,
+  dir,
+  key,
+  log,
+  open,
+  hasKey,
+  onToggle,
+  onHostChange,
+  onHostCommit,
+  onDirChange,
+  onDirCommit,
+  onKeyChange,
+  onKeySave,
+  onRestart,
+  onToggleLog
+}) {
+  const logLines = Array.isArray(log) ? log : []
+  return h(
+    "div",
+    { className: "dmb-card" },
+    h(
+      "div",
+      { className: "dmb-row", style: { justifyContent: "space-between", marginBottom: 6 } },
+      h("div", { className: "dmb-label", style: { marginBottom: 0 } }, "内置 Tailscale 节点"),
+      h("span", { className: `dmb-tag ${TS_TONE[phase] || ""}` }, TS_PHASE[phase] || phase),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h(
+        "div",
+        { className: "grow" },
+        h("div", { className: "name" }, "在本机运行 Tailscale 节点"),
+        h("div", { className: "hint" }, "开启后这台电脑不用装 Tailscale 客户端，手机在任意网络都能通过 tailnet 直连。"),
+      ),
+      h("input", {
+        className: "dmb-switch",
+        type: "checkbox",
+        checked: enabled,
+        disabled: busy !== "",
+        onChange: (event) => onToggle(event.target.checked)
+      }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h("div", { className: "grow" }, h("div", { className: "name" }, "节点名"), h("div", { className: "hint" }, "tailnet 里显示的设备名，改完自动重启节点。")),
+      h("input", {
+        className: "dmb-input",
+        style: { width: 176 },
+        value: host,
+        placeholder: ts.hostname || "dsh-bridge",
+        onChange: (event) => onHostChange(event.target.value),
+        onBlur: onHostCommit
+      }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h(
+        "div",
+        { className: "grow" },
+        h("div", { className: "name" }, "状态目录"),
+        h("div", { className: "hint" }, "节点把密钥与日志写在这里；被安全软件拦截时换成可写目录（清空恢复默认）。"),
+      ),
+      h("input", {
+        className: "dmb-input",
+        style: { width: 260 },
+        value: dir,
+        placeholder: ts.stateDir || "",
+        onChange: (event) => onDirChange(event.target.value),
+        onBlur: onDirCommit
+      }),
+    ),
+    h(
+      "div",
+      { className: "dmb-setting" },
+      h(
+        "div",
+        { className: "grow" },
+        h("div", { className: "name" }, "授权密钥"),
+        h(
+          "div",
+          { className: "hint" },
+          hasKey ? "已保存密钥，留空表示不修改。" : "tskey-auth-… 留空则需在浏览器里完成一次登录。",
+        ),
+      ),
+      h("input", {
+        className: "dmb-input",
+        style: { width: 200 },
+        type: "password",
+        autoComplete: "off",
+        value: key,
+        placeholder: hasKey ? "已保存" : "tskey-auth-…",
+        onChange: (event) => onKeyChange(event.target.value)
+      }),
+      h("button", { className: "dmb-btn", disabled: busy !== "" || key.trim() === "", onClick: onKeySave }, busy === "ts-key" ? "保存中…" : "保存密钥"),
+    ),
+    ts.error ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, ts.error) : null,
+    ts.authUrl
+      ? h(
+          "div",
+          { className: "dmb-sub", style: { marginTop: 10, lineHeight: 1.6 } },
+          "需要在浏览器完成授权：",
+          h("a", { href: ts.authUrl, target: "_blank", rel: "noreferrer", style: { color: "#4D6BFE" } }, ts.authUrl),
+        )
+      : null,
+    ts.ip4 || ts.tailnet || ts.listening
+      ? h(
+          "div",
+          { className: "dmb-ips" },
+          ts.ip4 ? h("span", { className: "dmb-chip dmb-mono" }, ts.ip4) : null,
+          ts.tailnet ? h("span", { className: "dmb-chip" }, ts.tailnet) : null,
+          ts.listening && !/^(?:0\.0\.0\.0|\[::\]|):/.test(ts.listening) ? h("span", { className: "dmb-chip dmb-mono" }, ts.listening) : null,
+          ts.peers ? h("span", { className: "dmb-chip" }, `tailnet ${ts.peers} 台设备`) : null,
+        )
+      : null,
+    Array.isArray(ts.health) && ts.health.length > 0
+      ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, ts.health.join("；"))
+      : null,
+    h(
+      "div",
+      { className: "dmb-actions", style: { marginTop: 12 } },
+      h("button", { className: "dmb-btn", disabled: busy !== "" || !enabled, onClick: onRestart }, busy === "ts-restart" ? "重启中…" : "重启节点"),
+      logLines.length > 0 ? h("button", { className: "dmb-btn", onClick: onToggleLog }, open ? "收起日志" : "查看日志") : null,
+    ),
+    open && logLines.length > 0 ? h("div", { className: "dmb-log" }, logLines.slice(-14).join("\n")) : null,
+  )
+}

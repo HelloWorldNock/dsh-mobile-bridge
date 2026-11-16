@@ -6,7 +6,7 @@
 
 | 层 | 命令 | 现状 | 覆盖 |
 |---|---|---|---|
-| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **179 例（178 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
+| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **181 例（180 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
 | Android 数据层 | `powershell -File tools/test-android.ps1` | **55 例** | 配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移、连接路由决策、会话与时间线折叠、时间线行折叠与纯文本导出 |
 | 真实宿主契约 | `cd host && $env:DSH_BRIDGE_INTEGRATION='1'; node --test test/integration/prompt.test.js` | 1 例（默认跳过） | 对运行中的桥接跑真 prompt 并核对历史落盘 |
 | 验收矩阵（API 层） | `node tools/acceptance.mjs --out docs/ACCEPTANCE-RESULT-x.md` | 11 项自动 + 10 项待真机 | 配对/鉴权/列表/建会话/归档/日志/图片校验；结果可归档 |
