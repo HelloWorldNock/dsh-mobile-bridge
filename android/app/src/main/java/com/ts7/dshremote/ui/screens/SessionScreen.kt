@@ -81,6 +81,9 @@ import com.ts7.dshremote.data.BridgeRepository
 import com.ts7.dshremote.data.SessionPrefs
 import com.ts7.dshremote.data.TimelineImage
 import com.ts7.dshremote.data.TimelineItem
+import com.ts7.dshremote.data.TimelineRowModel
+import com.ts7.dshremote.data.buildTimelineRows
+import com.ts7.dshremote.data.timelineToPlainText
 import com.ts7.dshremote.ui.ApprovalCard
 import com.ts7.dshremote.ui.QuestionCard
 import com.ts7.dshremote.ui.StatusDot
@@ -582,58 +585,6 @@ fun SessionScreen(
 }
 
 /** 简洁模式把相邻的工具调用/结果合并成一行摘要，其余消息原样展示。 */
-private sealed interface TimelineRowModel {    data class Single(val item: TimelineItem) : TimelineRowModel
-    data class Tools(val items: List<TimelineItem>) : TimelineRowModel
-}
-
-private fun buildTimelineRows(timeline: List<TimelineItem>, showDetails: Boolean): List<TimelineRowModel> {
-    if (showDetails) return timeline.map { TimelineRowModel.Single(it) }
-    val rows = mutableListOf<TimelineRowModel>()
-    val tools = mutableListOf<TimelineItem>()
-    fun flush() {
-        if (tools.isEmpty()) return
-        rows += TimelineRowModel.Tools(tools.toList())
-        tools.clear()
-    }
-    timeline.forEach { item ->
-        if (item.kind == "tool-call" || item.kind == "tool-result") {
-            tools += item
-        } else {
-            flush()
-            rows += TimelineRowModel.Single(item)
-        }
-    }
-    flush()
-    return rows
-}
-
-/**
- * 把整段对话铺成可复制的纯文本：用户/助手消息整段保留，工具调用与结果压成一行，
- * 生成中的流式文本附在最后。手机上没有跨气泡框选的机制，这条通路负责全量复制。
- */
-private fun timelineToPlainText(timeline: List<TimelineItem>, streamText: String): String {
-    val builder = StringBuilder()
-    timeline.forEach { item ->
-        val body = item.text.orEmpty().ifBlank { item.preview.orEmpty() }
-        when (item.kind) {
-            "user" -> builder.append("[我]\n").append(body).append("\n\n")
-            "assistant" -> builder.append("[DSH]\n").append(body).append("\n\n")
-            "tool-call" -> {
-                builder.append("· 工具 ").append(item.name ?: "tool")
-                if (body.isNotBlank()) builder.append("：").append(body.take(600))
-                builder.append('\n')
-            }
-            "tool-result" -> {
-                val result = (item.reason ?: body).take(600)
-                if (result.isNotBlank()) builder.append(result).append('\n')
-            }
-            "turn" -> builder.append(if (item.phase == "end") "—— 完成 ——\n" else "—— 运行中 ——\n")
-            else -> if (body.isNotBlank()) builder.append(body).append('\n')
-        }
-    }
-    if (streamText.isNotBlank()) builder.append("[DSH 生成中]\n").append(streamText).append('\n')
-    return builder.toString().trim()
-}
 
 @Composable
 private fun ToolGroupRow(items: List<TimelineItem>, expanded: Boolean, onToggle: () -> Unit) {
