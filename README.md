@@ -80,32 +80,21 @@ docs/                 契约与流程：API / SECURITY / RELEASE-* / STAGE*/CLOS
 | 接口字段、错误码、SSE 事件 | [`docs/API.md`](docs/API.md) |
 | 凭据/角色/授权边界 | [`docs/SECURITY.md`](docs/SECURITY.md) |
 | 每轮改了什么、验证到哪一级 | [`docs/STAGE2-2026-11-17.md`](docs/STAGE2-2026-11-17.md)、[`docs/CLOSEOUT-0.8.9.md`](docs/CLOSEOUT-0.8.9.md)、[`docs/RELEASE-0.9.0.md`](docs/RELEASE-0.9.0.md) |
-| 真机怎么验 | [`docs/ACCEPTANCE-0.8.9.md`](docs/ACCEPTANCE-0.8.9.md) |
+| 装、配对、升级、排障 | [docs/INSTALL.md](docs/INSTALL.md) |
+| 门禁、测试分层、发版动作 | [docs/TESTING.md](docs/TESTING.md) |
+| 真机怎么验 | [docs/ACCEPTANCE-0.8.9.md](docs/ACCEPTANCE-0.8.9.md) |
 
 ## 安装 host 插件（desktop profile）
 
-本机已完成安装并重启验证：
+本机已装好并验证：`profiles\desktop\node_modules\dsh-mobile-bridge` 是 `<repo-root>\host` 的目录联接，
+`profiles\desktop\package.json` 的 `dsh.profile.bundles` 含 `dsh-mobile-bridge`。
 
-1. `%USERPROFILE%\.dsh\profiles\desktop\node_modules\dsh-mobile-bridge` 是指向 `<repo-root>\host` 的目录联接。
-2. `profiles\desktop\package.json` 的 `dsh.profile.bundles` 包含 `"dsh-mobile-bridge"`。
+```powershell
+dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-<v>.tgz
+# 之后完整重启 DSH（不是 F5），再验证 http://127.0.0.1:48123/health
+```
 
-当前桥接已在运行，侧栏「手机远控」按钮与面板已在真实 desktop 窗口验证。
-
-更新 client `/client.js` 后，在 DSH 窗口按 **F5** 刷新页面即可重新加载，不需要重启整个应用；更新 host `server.js` 才会需要重启 Electron。只关闭面板不会重新加载 client。
-
-如果侧栏按钮点击后消失，或根本不显示：先按 F5；仍不行再完整退出 DSH（托盘退出，不能只关窗口）。0.1.0 已修复 `BRIDGE_PORT` 未定义导致的整块组件卸载，并为面板加了错误边界。也可以双击 `tools/restart-dsh.cmd` 做完整重启（会关闭当前会话窗口，重新打开后继续原会话）。
-
-`dsh-mobile-bridge` 随 DSH 桌面端自动启动：它是 desktop profile 的 host bundle，DSH 启动时加载并监听端口，不需要手工运行；关闭 DSH 后端口也随之消失。PC 侧控制端是 DSH 内的 client 插件，不再提供网页设置页。
-
-- 桥接监听 `0.0.0.0:48123`，UDP 发现 `48124`；虚拟机场景由宿主机中继在 `48126/udp` 代答
-- 打开方式：DSH 侧栏底部「手机远控」按钮，或 设置 → 插件 → 手机远控 卡片
-- 面板显示设备 ID、IP、6 位配对码（120 秒有效）、已配对设备、开关和超时
-- 面板底部「版本」卡片显示当前插件版本，「检查更新」会去 GitHub 比对最新 release；手机端 设置 → 关于 同样有「检查更新」，启动后 6 小时内只自动查一次
-- 图标使用 `绘制图标.png` 生成的 Q 版鲸鱼 adaptive icon，生成脚本为 `tools/make_icon.py`
-
-本机这份是开发态：目录联接 + `dsh.profile.bundles` 里写着 `"dsh-mobile-bridge"`，改 `host/` 里的代码立即生效。
-
-> 0.3.1 起 `/api/workspaces` 会返回每个工作区的 `sessionIds`，手机端按它做工作区分组；旧版桥接没有该字段、工作区列表为空或路径大小写不一致时，App 会退回按会话 `cwd` 归组，不再把所有任务塞进“未归类”。0.3.2 把工作区 `updatedAt` 统一成毫秒数，修掉新版 DSH 下手机端「没有可用工作区」。0.3.0 新增图片 prompt、`/api/discovery` 和局域网/Tailscale 端点上报。host bundle 只在 DSH 启动时加载，升级后需要完整退出并重启 DSH（不是只按 F5），`/api/info` 才会带 `endpoints` 和图片能力。如果 DSH 跑在虚拟机里，Tailscale 必须装在虚拟机内，或按下面的“备用地址”方式把宿主机的 tailnet 转发地址告诉手机。
+完整的安装、配对、虚拟机 NAT、升级/撤销/重置与排障步骤见 **[docs/INSTALL.md](docs/INSTALL.md)**。
 
 ## 打包为可分发插件
 
@@ -113,7 +102,7 @@ docs/                 契约与流程：API / SECURITY / RELEASE-* / STAGE*/CLOS
 
 ```powershell
 powershell -NoProfile -File tools/pack-plugin.ps1
-# → dist/dsh-mobile-bridge-0.9.0.tgz（约 9.0 MB / 29 个文件，含 bin/tsnode-windows-amd64.exe）
+# → dist/dsh-mobile-bridge-0.9.0.tgz（约 9.0 MB / 36 个文件，含 lib/adapters、lib/routes、lib/services 与 bin/tsnode-windows-amd64.exe）
 
 # 发布门禁：解包逐文件比对 SHA-256，并检查三处版本号一致（不一致退出码 1）
 node tools/verify-package.mjs
@@ -133,27 +122,12 @@ dsh plugin --profile <profile> add file:<repo-root>\dist\dsh-mobile-bridge-0.9.0
 
 ## 手机连接
 
-1. 安装 `dist/TS7-DSH-Remote-0.9.0-debug.apk`。
-2. 手机与电脑连同一个 Wi-Fi，或都登录同一个 Tailscale tailnet。
-3. 打开 App，等待 UDP 自动发现，或手动输入 `电脑IP:48123`（远程时填 `100.x.x.x:48123`，并打开表单下方的「通过 Tailscale 连接」开关）。
-4. 在 DSH 侧栏「手机远控」面板读取 6 位配对码，输入手机。
-5. 配对成功后 token 保存在本机，后续自动重连；局域网和 Tailscale 两条线路会自动选择，无需手动切换。
-6. 需要更多主机时，在 App 顶部的「主机 +」或 设置 → 添加另一台主机，重复 2–5。每台主机独立保存 token、任务和审批；同一台电脑运行多个 DSH 实例时，需要给各自的桥接插件配置不同端口。App 按「设备 ID + 端口」区分主机，共用状态文件的多个实例也能分别保留。
-7. 发图片：新建任务页或任务详情输入框点「图片」，从系统相册选 1–4 张；App 会压到长边 1600、单张 ≤ 3.5 MB 后以 base64 随 prompt 发送。模型不支持图片时，DSH 会返回自己的错误。
+1. 装 `dist/TS7-DSH-Remote-<v>-debug.apk`（debug 包名 `com.ts7.dshremote.debug`）。
+2. 手机与电脑同一 Wi-Fi，或都登录同一个 tailnet。
+3. 打开 App：UDP 自动发现，或手填 `电脑IP:48123`；远程填 `100.x.x.x:48123` 并打开「通过 Tailscale 连接」。
+4. 在 DSH 侧栏「手机远控」面板读 6 位配对码，输入手机。
 
-MuMu 模拟器使用 NAT，宿主地址是 `10.0.2.2`；测试时填 `10.0.2.2:48123`。
-
-如果 DSH 跑在 VMware/VirtualBox 的 NAT 虚拟机里（例如虚拟机 IP 在 `192.168.x.x` 网段），手机既连不上该地址，也收不到虚拟机的 UDP 广播。宿主机需要做两件事：
-
-```powershell
-# 1) TCP：把宿主机 48125 转发到虚拟机的桥接端口
-netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=48125 connectaddress=203.0.113.20 connectport=48123
-
-# 2) UDP：复制 tools/discovery-relay.example.json 为 tools/discovery-relay.json，改好本机地址后注册发现中继
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/install-discovery-relay.ps1
-```
-
-`discovery-relay.json` 里填虚拟机的 `target`（`IP:48124`）、宿主机访问转发端口的 `httpUrl`、宿主机的 `publicHost`、转发端口 `publicPort`，以及可选的宿主机 Tailscale 地址 `tailscaleHost` 和显示名 `hostName`。中继监听 `48126/udp`，收到发现包后先查 `/api/discovery`；旧版桥接没有该接口时退回 `/health`，用配置里的显示名补一条应答。应答里的地址统一改写成宿主机地址（`publicHost:publicPort` 和 Tailscale 地址），所以手机看到的是可达的入口，而不是虚拟机的 `192.168.x.x` 地址。App 同时扫描 `48124` 和 `48126`，局域网里的普通 DSH 和 NAT 虚拟机都能自动出现。防火墙需放行 `48126/udp`。更彻底的做法是把虚拟机网卡改成桥接，让虚拟机直接获得路由器网段地址。
+图片上限、多主机、虚拟机 NAT 转发、明文策略见 **[docs/INSTALL.md](docs/INSTALL.md)**。
 
 ## Tailscale 远程
 
@@ -275,76 +249,25 @@ Android App  ──HTTP/JSON + SSE──▶  http://<PC-IP>:48123  ──▶  DS
 
 ## 构建 Android
 
-仓库已提交 Gradle Wrapper（`android/gradlew`、`gradlew.bat`、`gradle/wrapper/`），固定 8.9，新机器不用装 Gradle：
+仓库已提交 Gradle Wrapper（固定 8.9）：
 
 ```powershell
-$env:JAVA_HOME='<toolchain>\jdk-17'
-$env:ANDROID_HOME='<toolchain>\android-sdk'
-$env:GRADLE_USER_HOME='<toolchain>\gradle-home'   # 首次会下载 gradle-8.9-bin.zip
-cd <repo-root>\android
-.\gradlew.bat :app:assembleDebug --no-daemon
+$env:JAVA_HOME='<toolchain>\jdk-17'; $env:ANDROID_HOME='<toolchain>\android-sdk'
+$env:GRADLE_USER_HOME='<toolchain>\gradle-home'
+cd <repo-root>\android; .\gradlew.bat :app:assembleDebug --no-daemon
 ```
 
-用本机现成的 gradle-8.9 也一样（等价）：
-
-```powershell
-& '<toolchain>\gradle-8.9\bin\gradle.bat' -p '<repo-root>\android' :app:assembleDebug --no-daemon
-```
-
-产物：`android/app/build/outputs/apk/debug/app-debug.apk`。debug 包名是 `com.ts7.dshremote.debug`。
-
-如果 Kotlin 编译报 `AccessDeniedException` 且 `whoami /groups` 显示 `Low Mandatory Level`，说明 `.toolchain` 带了低完整性标签，执行一次：
-
-```powershell
-icacls "<toolchain>" /setintegritylevel '(OI)(CI)High'
-```
-
-安装到 MuMu（把 MuMu 自带的 `adb.exe` 加进 PATH，或写它的完整路径）：
-
-```powershell
-adb install -r `
-  '<repo-root>\android\app\build\outputs\apk\debug\app-debug.apk'
-adb shell am start `
-  -n com.ts7.dshremote.debug/com.ts7.dshremote.MainActivity
-```
+工具链与 MuMu 安装细节见 **[docs/INSTALL.md](docs/INSTALL.md)**。
 
 ## 测试
 
 ```powershell
-# Host 侧
-cd host
-npm run check
-node --test
-
-# Android 数据层（JVM 单测，31 例）
-powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-android.ps1
+cd host; node scripts/check.mjs; node --test          # 150 例（含 1 条默认跳过的真实宿主用例）
+powershell -File tools/test-android.ps1               # Android 数据层 34 例
+node tools/verify-package.mjs                         # 包一致性门禁
 ```
 
-当前 113 个 host 测试（13 个文件）全部通过，覆盖：配对/token/撤销、DTO 投影、审批接管与回退、双端审批（桌面先答/手机先答撤销桌面卡/被动结果继续等手机/断连）、问题回答、plan-review、HTTP 鉴权、CSRF、会话/历史/prompt/rename/cancel/permission/plan、创建会话（`sessionId` 续跑、cwd 归位工作区、派发失败清理空会话）、图片 prompt（格式/大小/数量校验）、旧会话过滤与文件删除、归档会话过滤与工作区分组剔除、归档/取消归档接口与运行中拒绝、归档集合变化到 `session.removed`/`session.added` 的换算、局域网/Tailscale 地址分类与端点合并、`/api/info` 端点上报、绑定组创建/邀请码/加入/退出/gossip、组密钥权限边界（含派活不能越出协作工作区）、协作工作区配置（相对路径拒绝）、协作工作区下的文件列举与越界拒绝、组内委派（workspaceId 优先、cwd 回退、续跑、并发权限、缺失时报错）、宿主兼容性探针（齐全/缺必需接口/签名漂移/同步 resolveByPath 降级/空 ctx）、全部设备路由的缺 token 与伪造 token 401、`/api/group/hello` 只认组密钥不收设备 token、无绑定组时 503。
-
-MuMu 端到端已验证（0.8.7 一轮）：配对、任务列表、新建任务、流式回复、审批允许/拒绝、plan-review 批准后继续、通知动作、前台服务、断线重连、图片选择与发送、NAT 虚拟机自动发现。亮色 UI、Q 版图标、过滤后的任务列表和 DSH 侧栏控制面板都实际跑过。**0.8.9 这一轮的归档/取消归档、`/api/logs`、0.2.x 适配尚未在同一台真机上重跑**，见下一节的层级口径。
-
-Android 侧 31 个 JVM 单测（`android/app/src/test`）覆盖：配对记录读写 / 0.1.x 单主机迁移 / `activeId`、`hostId` 与端口规则、地址分类与局域网优先 / 合并去重 / 显式钉住传输、待办队列合并的三种时序（服务端权威 / 本地新卡片存活 / 同 id 不重复）、建连与事件流两套退避曲线、明文白名单（私网放行、公网拒绝、https 放行、IPv6 回环与链路本地）。
-
-> 仓库路径含中文时 Gradle 的 test worker 会起不来（`ClassNotFoundException: worker.org.gradle.process.internal.worker.GradleWorkerMain`——worker 的 classpath 通过 `@<argfile>` 传给子 JVM）。`tools/test-android.ps1` 会先建 ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；在纯 ASCII 路径下直接 `.\gradlew.bat :app:testDebugUnitTest` 也可以。
-
-DSH client 插件已在隔离 web profile 和真实 desktop 窗口验证：侧栏出现「手机远控」按钮，点击后弹出面板，能读取桥接状态、设备、配对码和设备列表；修复 `BRIDGE_PORT` 未定义后，按钮在面板关闭后仍保持存在，错误边界与 `dsh-app://app` CORS 生效。
-
-### 验收口径（五级分层）
-
-不要把「单测通过」当成「真机跑过」。任何一条能力声明都必须标注它落在哪一级：
-
-| 层级 | 含义 | 通过标准 |
-|---|---|---|
-| L1 已实现 | 源码里存在完整实现 | 代码 review |
-| L2 已单测 | 相关逻辑有单元测试覆盖 | `npm test` / `gradlew test` |
-| L3 已集成 | 多模块实际联动 | 对接真实 DSH 宿主跑通 |
-| L4 已真机 | 真实 Android 设备上完成操作 | 真机矩阵有记录 |
-| L5 已交付 | 独立环境安装、配对、运行、升级 | 另一台机器复现 |
-
-当前 0.9.0 的状态：Host 侧（配对、会话、prompt/流式、审批/提问、归档与取消归档、工作区、绑定组、协作、宿主探针、鉴权矩阵）是 **L2**，并有 1 条对真实宿主跑通的契约用例（L3）；Android 数据层（配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移）有 34 例 JVM 单测（**L2**），Keystore 加密与网络策略只做到 **L1 + 可构建**（APK 内已含 `EncryptedSharedPreferences` 与策略码）；真机矩阵（R09）待跑。**结论口径：项目核心功能具备代码实现与 Host 单元测试基础，Host 桥接服务已运行；Android 端完整功能、跨网络稳定性及真实设备体验尚待一轮真机验收。**
-
-注意：PC 控制端已从网页改为 DSH client 插件，`host/lib/setup-page.js` 已删除。更新 `client.js` 后在 DSH 窗口按 F5 刷新页面即可加载；只有修改 host `server.js` 才需要完整重启 Electron。需要完整重启时可运行 `tools/restart-dsh.cmd`。
+全部门禁、五级验收口径与测试盲区见 **[docs/TESTING.md](docs/TESTING.md)**。
 
 ## HTTP API 摘要
 
