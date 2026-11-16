@@ -100,15 +100,15 @@ $env:GRADLE_USER_HOME='<repo>\.toolchain\gradle-home'
 
 发布链路是 `tools/publish-github.ps1`（幂等：仓库/release/资产已存在则复用或替换），它建仓、推 main、打 `vX.Y.Z`、传资产；版本号要同时改三处：`host/package.json`、`host/lib/index.js` 的 `VERSION`、`android/app/build.gradle.kts` 的 `versionCode`/`versionName`。
 
-**当前发布状态是断的**：最新 tag 只有 `v0.8.4`，0.8.5–0.8.8 都没打；`contrib/` 的 tarball 和 version 仍指 0.8.3。所以手机/面板的「检查更新」比对的是 0.8.4 之前的 release。
+**发布状态（2026-11-16 收口后）**：`v0.8.9` 已打在 `dbe4a9a` 上并推到 origin，GitHub Release 内含 tgz / APK / `tsnode-windows-amd64.exe` / `SHA256SUMS-0.8.9.txt`；`contrib/` 的 tarball 与 version 已指 0.8.9。0.8.5–0.8.8 没有补发（0.8.8 产物落后源码，补发语义不清，按整改路线 D-1 直接跳版）。
 
 ## 9. 测试
 
 `host/test/` 下 12 个文件、101 个用例（`node --test`，约 3.8 s），覆盖 auth/approvals/collab/group/server/dto/events/history/logs/endpoints/tailscale/update；`scripts/check.mjs` 做语法与导出检查（18 个模块）。
 
-**关键事实：`test/` 从未入库。** `.gitignore` 里有一条无锚点的 `test/`，把 `host/test/` 一起忽略了（`git ls-files host/test` 为空）。新 clone 下来 `npm test` 是 0 个用例。恢复方式：把 `.gitignore` 的 `test/` 改成 `/testhome/`，然后 `git add host/test`。
+**测试已入库**：`.gitignore` 里的无锚点 `test/` 改成 `/test/`，`git ls-files host/test` 现在是 12 个文件，新 clone 直接 `cd host && npm test` 就能跑满 101 例。发布前还有一道包一致性门禁：`node tools/verify-package.mjs`（解包逐文件比 SHA-256 + 三处版本号一致）。
 
-没有 CI（无 `.github/`）。`server.test.js`（1,126 行）是主要回归网；`client.js` 面板、`tool.js`、`index.js`、`state.js`、`discovery.js`、`preview.js` 无测试。
+有 CI：`.github/workflows/ci.yml`（push/PR 跑 `check.mjs` + `node --test`，另一个 job 打包后过 `verify-package.mjs`）。`server.test.js`（1,126 行）是主要回归网；`client.js` 面板、`tool.js`、`index.js`、`state.js`、`discovery.js`、`preview.js` 无测试。
 
 ## 10. 已知坑速查
 
@@ -124,11 +124,14 @@ $env:GRADLE_USER_HOME='<repo>\.toolchain\gradle-home'
 | Gradle 报 `AccessDeniedException` + `Low Mandatory Level` | `.toolchain` 带了低完整性标签 | `icacls "<toolchain>" /setintegritylevel '(OI)(CI)High'` |
 | MuMu 连不上 | 模拟器 NAT 网段 | 填 `10.0.2.2:48123` |
 | 手机在虚拟机宿主机之间发现不了 | DSH 在 NAT 虚拟机里 | 宿主机跑发现中继（`install-discovery-relay.ps1`，UDP 48126）+ TCP portproxy |
-| 超时和文档不一致 | `host/README.md` 配置表写 30/60/120 s，实际默认值在 `state.js`：120/120/180 s | 以 `state.js` 为准；`host/README.md` 还停在 0.3.0（62 个测试、state 路径也写错） |
+| 超时和文档不一致 | `host/README.md` 配置表写 30/60/120 s，实际默认值在 `state.js`：120/120/180 s | 0.8.9 起只有一处定义：`state.js` 的 `TIMEOUT_DEFAULTS`，`index.js` 直接引用；`host/README.md` 仍停在 0.3.0，以根 README 为准 |
+| 手机上「取消归档」找不到 | 0.8.9 之前只能电脑恢复 | 换装 0.8.9 APK：归档后任务会留在当前任务里，菜单变「取消归档」；被电脑归档时顶部还有提示条 |
 
 ## 11. 接手后先做什么
 
-按 [ANALYSIS-2026-11-16.md](ANALYSIS-2026-11-16.md) 第六节：交付收口（测试入库 → 升 0.8.9 → 重打包并加哈希门禁 → 补 release note 与 README → 打 tag、修 contrib）→ 最小 CI → 宿主契约探针 → 交付形态（release 签名、ABI 拆分、Keystore）。功能扩展排在最后。
+阶段一（交付收口）已在 0.8.9 完成：测试入库、哈希门禁、重打包核对、超时统一、手机取消归档、README/contrib 补齐、升版发版、最小 CI。**唯一没做完的是 R09 真机矩阵**——按 [ACCEPTANCE-0.8.9.md](ACCEPTANCE-0.8.9.md) 逐项跑并留档。
+
+接着按 [deepseek_markdown_20261116_b475f4.md](deepseek_markdown_20261116_b475f4.md) 阶段二推进：启动兼容性探针（R11）→ Android P0 数据层测试（R12）→ 真实 DSH 契约用例（R13）→ Keystore 加密 token（R14）→ 网络安全配置（R15）→ `/api/group/hello` 鉴权审计（R16）→ 协作组角色权限设计（R17）→ 构建可复现（R18，含提交 gradlew wrapper）。功能扩展（审批 always-allow / 模型切换 / fork / 子代理控制）排在最后。
 
 ## 12. 交接验收清单
 
@@ -137,7 +140,7 @@ $env:GRADLE_USER_HOME='<repo>\.toolchain\gradle-home'
 - [ ] 手机配对成功，任务列表按工作区分组，能新建任务并看到流式回复
 - [ ] 审批与提问在手机和桌面**同时**弹卡，任一端处理后另一端撤卡
 - [ ] 图片能发也能在时间线里显示（点开全屏）
-- [ ] 归档后手机列表消失；手机端菜单能归档（需 0.8.8 APK）
+- [ ] 归档后手机列表消失；手机端菜单能归档，也能「取消归档」（需 0.8.9 APK）
 - [ ] 内嵌节点卡片能启动并给出登录地址；断线按 2→60 s 退避
 - [ ] 两台 PC 能组队，`delegate` 能在对端协作工作区产出文件
 - [ ] 设置里「导出运行日志」能拿到含主机段落的文本
