@@ -206,6 +206,45 @@ window.__ModuleLoader__.load({
       )
     }
 
+    /**
+     * 已配对设备卡片。
+     *
+     * 从 `PanelBody` 里搬出来：只吃 `devices` / `busy` 与一个撤销回调，不碰任何外部状态，
+     * 因此可以用假 React 直接渲染（见 `test/client-render.test.js`）。
+     */
+    function DevicesCard({ devices, busy, onRevoke }) {
+      const active = (devices || []).filter((device) => !device.revokedAt)
+      return h(
+        "div",
+        { className: "dmb-card" },
+        h("div", { className: "dmb-label", style: { marginBottom: 10 } }, "已配对设备"),
+        h(
+          "div",
+          { className: "dmb-devices" },
+          active.length === 0
+            ? h("div", { className: "dmb-empty" }, "还没有设备配对")
+            : active.map((device) =>
+                h(
+                  "div",
+                  { className: "dmb-device", key: device.id },
+                  h("span", { className: "dmb-dot", style: { color: "#16A34A" } }),
+                  h(
+                    "div",
+                    { className: "grow" },
+                    h("div", { className: "name" }, device.name || "Android 设备"),
+                    h("div", { className: "meta" }, `${device.model || "未知型号"} · 最近 ${fmtTime(device.lastSeenAt)}`),
+                  ),
+                  h(
+                    "button",
+                    { className: "dmb-btn", disabled: busy !== "", onClick: () => onRevoke(device) },
+                    "撤销",
+                  ),
+                ),
+              ),
+        ),
+      )
+    }
+
 
     /**
      * 宿主兼容性横幅。探针在 DSH 启动时跑一次，结果随 /api/setup/state 下发：
@@ -669,42 +708,14 @@ window.__ModuleLoader__.load({
               )
             : null,
           snap
-            ? h(
-                "div",
-                { className: "dmb-card" },
-                h("div", { className: "dmb-label", style: { marginBottom: 10 } }, "已配对设备"),
-                h(
-                  "div",
-                  { className: "dmb-devices" },
-                  (snap.devices || []).filter((device) => !device.revokedAt).length === 0
-                    ? h("div", { className: "dmb-empty" }, "还没有设备配对")
-                    : (snap.devices || []).filter((device) => !device.revokedAt).map((device) =>
-                        h(
-                          "div",
-                          { className: "dmb-device", key: device.id },
-                          h("span", { className: "dmb-dot", style: { color: "#16A34A" } }),
-                          h(
-                            "div",
-                            { className: "grow" },
-                            h("div", { className: "name" }, device.name || "Android 设备"),
-                            h("div", { className: "meta" }, `${device.model || "未知型号"} · 最近 ${fmtTime(device.lastSeenAt)}`),
-                          ),
-                          h(
-                            "button",
-                            {
-                              className: "dmb-btn",
-                              disabled: busy !== "",
-                              onClick: async () => {
-                                if (!window.confirm(`撤销 ${device.name || "该设备"} 的配对？`)) return
-                                await post("revoke", "/api/setup/revoke", { deviceId: device.id })
-                              },
-                            },
-                            "撤销",
-                          ),
-                        ),
-                      ),
-                ),
-              )
+            ? h(DevicesCard, {
+                devices: snap.devices || [],
+                busy,
+                onRevoke: async (device) => {
+                  if (!window.confirm(`撤销 ${device.name || "该设备"} 的配对？`)) return
+                  await post("revoke", "/api/setup/revoke", { deviceId: device.id })
+                },
+              })
             : null,
           snap
             ? (() => {

@@ -38,3 +38,42 @@ export function ErrorPanel({ error, onClose }) {
     h("button", { className: "dmb-btn", style: { marginTop: 14 }, onClick: onClose }, "关闭"),
   )
 }
+
+/**
+ * 已配对设备卡片。
+ *
+ * 从 `PanelBody` 里搬出来：只吃 `devices` / `busy` 与一个撤销回调，不碰任何外部状态，
+ * 因此可以用假 React 直接渲染（见 `test/client-render.test.js`）。
+ */
+export function DevicesCard({ devices, busy, onRevoke }) {
+  const active = (devices || []).filter((device) => !device.revokedAt)
+  return h(
+    "div",
+    { className: "dmb-card" },
+    h("div", { className: "dmb-label", style: { marginBottom: 10 } }, "已配对设备"),
+    h(
+      "div",
+      { className: "dmb-devices" },
+      active.length === 0
+        ? h("div", { className: "dmb-empty" }, "还没有设备配对")
+        : active.map((device) =>
+            h(
+              "div",
+              { className: "dmb-device", key: device.id },
+              h("span", { className: "dmb-dot", style: { color: "#16A34A" } }),
+              h(
+                "div",
+                { className: "grow" },
+                h("div", { className: "name" }, device.name || "Android 设备"),
+                h("div", { className: "meta" }, `${device.model || "未知型号"} · 最近 ${fmtTime(device.lastSeenAt)}`),
+              ),
+              h(
+                "button",
+                { className: "dmb-btn", disabled: busy !== "", onClick: () => onRevoke(device) },
+                "撤销",
+              ),
+            ),
+          ),
+    ),
+  )
+}

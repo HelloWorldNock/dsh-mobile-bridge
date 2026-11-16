@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { DevicesCard } from '../client-src/components.mjs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -165,4 +166,51 @@ test('SettingsCard respects the settings.plugins.tab filter', () => {
   react.reset()
   const tree = react.render(SafeSettingsCard, { only: 'dsh-mobile-bridge' })
   assert.ok(tree !== null && typeof tree === 'object')
+})
+
+
+
+test('DevicesCard renders the empty state and the list with revoke callback', () => {
+  globalThis.h = (type, props, ...children) => ({ type, props: props ?? {}, children })
+  globalThis.fmtTime = (iso) => (iso ? `t:${iso}` : '从未')
+  try {
+    const empty = DevicesCard({ devices: [], busy: '', onRevoke: () => {} })
+    assert.equal(empty.type, 'div')
+    assert.match(flatten(empty).join(' '), /还没有设备配对/)
+
+    const revoked = []
+    const card = DevicesCard({
+      devices: [
+        { id: 'd1', name: 'Pixel', model: 'Pixel 8', lastSeenAt: '2026-11-17T00:00:00Z' },
+        { id: 'd2', name: '旧设备', revokedAt: '2026-11-01T00:00:00Z' }
+      ],
+      busy: '',
+      onRevoke: (device) => revoked.push(device.id)
+    })
+    const text = flatten(card).join(' ')
+    assert.match(text, /Pixel/)
+    assert.match(text, /Pixel 8/)
+    // 已撤销的设备不再出现在列表里
+    assert.ok(!text.includes('旧设备'), `已撤销设备不该出现：${text}`)
+
+    // 撤销按钮在树里，点它会回调
+    // 注意：数组子节点是常态（map 出来的列表），要递归进去
+    const findButtons = (node, out = []) => {
+      if (node === null || typeof node !== 'object') return out
+      if (Array.isArray(node)) {
+        for (const child of node) findButtons(child, out)
+        return out
+      }
+      if (node.type === 'button') out.push(node)
+      for (const child of node.children ?? []) findButtons(child, out)
+      return out
+    }
+    const buttons = findButtons(card)
+    assert.equal(buttons.length, 1)
+    buttons[0].props.onClick()
+    assert.deepEqual(revoked, ['d1'])
+  } finally {
+    delete globalThis.h
+    delete globalThis.fmtTime
+  }
 })

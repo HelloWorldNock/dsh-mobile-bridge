@@ -522,42 +522,14 @@ window.__ModuleLoader__.load({
               )
             : null,
           snap
-            ? h(
-                "div",
-                { className: "dmb-card" },
-                h("div", { className: "dmb-label", style: { marginBottom: 10 } }, "已配对设备"),
-                h(
-                  "div",
-                  { className: "dmb-devices" },
-                  (snap.devices || []).filter((device) => !device.revokedAt).length === 0
-                    ? h("div", { className: "dmb-empty" }, "还没有设备配对")
-                    : (snap.devices || []).filter((device) => !device.revokedAt).map((device) =>
-                        h(
-                          "div",
-                          { className: "dmb-device", key: device.id },
-                          h("span", { className: "dmb-dot", style: { color: "#16A34A" } }),
-                          h(
-                            "div",
-                            { className: "grow" },
-                            h("div", { className: "name" }, device.name || "Android 设备"),
-                            h("div", { className: "meta" }, `${device.model || "未知型号"} · 最近 ${fmtTime(device.lastSeenAt)}`),
-                          ),
-                          h(
-                            "button",
-                            {
-                              className: "dmb-btn",
-                              disabled: busy !== "",
-                              onClick: async () => {
-                                if (!window.confirm(`撤销 ${device.name || "该设备"} 的配对？`)) return
-                                await post("revoke", "/api/setup/revoke", { deviceId: device.id })
-                              },
-                            },
-                            "撤销",
-                          ),
-                        ),
-                      ),
-                ),
-              )
+            ? h(DevicesCard, {
+                devices: snap.devices || [],
+                busy,
+                onRevoke: async (device) => {
+                  if (!window.confirm(`撤销 ${device.name || "该设备"} 的配对？`)) return
+                  await post("revoke", "/api/setup/revoke", { deviceId: device.id })
+                },
+              })
             : null,
           snap
             ? (() => {

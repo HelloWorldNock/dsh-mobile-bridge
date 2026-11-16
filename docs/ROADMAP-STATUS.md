@@ -2,7 +2,7 @@
 
 > 这份表是「路线走到哪」的唯一索引：每一项给出**证据位置**与**层级口径**
 > （L1 已实现 / L2 已单测 / L3 已集成 / L4 已真机 / L5 已交付，定义见 [`TESTING.md`](TESTING.md)）。
-> 最近更新：0.9.8。
+> 最近更新：0.9.9。
 
 ## 阶段一：交付收口（R01–R10）
 
@@ -39,7 +39,7 @@
 | R19 | 拆 `BridgeRepository.kt` | ✅ | 抽出 `KeyValueStore` / `PendingMerge` / `ReconnectPolicy` / `ConnectionRouter` / `SessionSyncManager`，仓库只剩副作用 |
 | R20 | 拆 `SessionScreen.kt` | ✅ | 1,084 → 585 行；`TimelineFormat`（纯逻辑）+ `SessionTimeline.kt` + `SessionDialogs.kt` |
 | R21 | 拆 `server.js` | ✅ | 1,438 → 738 行；`routes/{setup,workspaces,connections,sessions}.js` + `services/{prompt,format}.js` + `adapters/dsh/` |
-| R22 | 拆 `client.js` | ◐ 四刀 | `client-src/{styles,helpers,components}.mjs` + 生成器 `--check` + 渲染冒烟测试（`test/client-render.test.js`）；`PanelBody`（约 880 行）仍待切 |
+| R22 | 拆 `client.js` | ◐ 五刀 | `client-src/{styles,helpers,components}.mjs` + 生成器 `--check` + 渲染冒烟测试（`test/client-render.test.js`）+ `DevicesCard` 已拆出；`PanelBody`（约 900 行）的组/节点/日志/更新四块仍待切 |
 | R23 | `adapters/dsh/` 落地 | ✅ | 会话/工作区适配层，`server.js` 里 0 处直接摸宿主接口 |
 | R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、22 条路由、形状、12 类 SSE、60 个错误码 |
 | R25 | 文档单一事实源 | ✅ | [`API.md`](API.md) / [`INSTALL.md`](INSTALL.md) / [`TESTING.md`](TESTING.md) / [`SECURITY.md`](SECURITY.md) + README 文档地图 |
@@ -56,9 +56,9 @@
 ## 当前质量基线（0.9.8）
 
 ```
-host      : 27 模块 / 174 例（173 过 + 1 集成用例默认跳过）
+host      : 27 模块 / 175 例（174 过 + 1 集成用例默认跳过）
 android   : 55 例
 门禁      : verify-package PASS（38 文件 / 26 个 lib/** 同哈希，版本三处一致）
-构建      : assembleDebug / assembleRelease 均成功（versionCode 29，ABI 三包）
-发布      : 最新 v0.9.8（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
+构建      : assembleDebug / assembleRelease 均成功（versionCode 30，ABI 三包）
+发布      : 最新 v0.9.9（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
 ```
