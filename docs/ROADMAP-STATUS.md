@@ -116,7 +116,18 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 2. **R26 发布私钥**：跑一次 `tools/make-keystore.ps1` 即可（密钥与口令由它生成并写进已 gitignore 的位置）；我这边的执行环境禁止创建 `.jks`，所以只能把链路和门禁做到「一条命令可用」。
 3. ~~R22 剩余~~：已完成（九个区块组件化）。
 
-## 当前质量基线（0.9.15）
+## 当前质量基线（0.9.16）
+
+### 宿主升级踩过的坑（DSH 0.2.2-rc.3，2026-11-17）
+
+宿主把「没写进 `inject` 的服务」改成了**严格代理**：读 `ctx.slots` 这类未声明服务会直接抛
+`cannot get property "slots" without inject`，而不是返回 `undefined`。我们的启动兼容性探针会对
+`slots` / `attachments` 做属性探测，于是**探针自己把 `apply()` 打崩**，插件在设置里显示
+`fiberPhase: failed`、PC 侧 48123 根本没起来（面板还在，但一直报「桥接未运行」）。
+
+修法：探针逐级 `try/catch`（抛错按「不可读」处理并注明是严格模式）、`logger` 接受 function、
+签名可疑降级为警告；重启思路：`plugin_manager` 里禁用再启用一次即可（HMR 不会自动重试失败的条目）。
+修完后 `/health` → 0.9.16，`node tools/acceptance.mjs` → **13 通过 / 0 失败 / 9 跳过**（A8 也转绿）。
 
 ```
 host      : 27 模块 / 185 例（184 过 + 1 集成用例默认跳过）
