@@ -6,7 +6,7 @@
 
 | 层 | 命令 | 现状 | 覆盖 |
 |---|---|---|---|
-| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **186 例（185 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
+| Host 单元/路由 | `cd host && node scripts/check.mjs && node --test` | **189 例（188 过 + 1 跳过）**，27 个模块 | 配对/鉴权/审批/会话/工作区/归档/组/协作/适配层/兼容性探针/路由模块 |
 | Android 数据层 | `powershell -File tools/test-android.ps1` | **55 例** | 配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移、连接路由决策、会话与时间线折叠、时间线行折叠与纯文本导出 |
 | 真实宿主契约 | `cd host && $env:DSH_BRIDGE_INTEGRATION='1'; node --test test/integration/prompt.test.js` | 1 例（默认跳过） | 对运行中的桥接跑真 prompt 并核对历史落盘 |
 | 真机验收（设备侧） | ode tools/device-matrix.mjs --only A15 --wait 120 | 见 [ACCEPTANCE-DEVICE.md](ACCEPTANCE-DEVICE.md) | 需要手机上点一次；脚本负责主机侧动作并回读结果 |
@@ -60,7 +60,7 @@ ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；纯 ASC
 | G10 | 网络切换 | LAN ↔ Tailscale ↔ 断网恢复 | 待跑 |
 | G11 | 后台运行 | 通知 / 后台恢复 / 进程回收 | 待跑 |
 | G12 | 发布信息 | 版本三处一致 + Note + contrib | ✅ |
-| G13 | 契约漂移（字段级） | `node tools/check-api-doc.mjs`：路由里读到的每个 `body.<字段>` 必须在 `docs/API.md` 里出现（同时是 `host/test/api-doc.test.js`） | ✅ 每条测试都跑 |
+| G13 | 契约漂移（字段级 + 枚举级） | `node tools/check-api-doc.mjs`：路由里读到的每个 `body.<字段>`、以及比较过的每个 `action`/`preset` 取值，都必须在 `docs/API.md` 里出现（同时是 `host/test/api-doc.test.js`） | ✅ 每条测试都跑 |
 | G14 | 契约漂移（路由级） | `node tools/check-api-routes.mjs`：代码里的字面量/前缀/正则路由与文档路由表**双向**比对（同时是 `host/test/api-routes.test.js`） | ✅ 每条测试都跑 |
 | G15 | 契约漂移（凭据级） | `node tools/check-security-doc.mjs`：代码里的凭据前缀必须在 `docs/SECURITY.md` 出现；文档里「没实现也没标设计方案」的前缀会被拦下（同时是 `host/test/security-doc.test.js`） | ✅ 每条测试都跑 |
 

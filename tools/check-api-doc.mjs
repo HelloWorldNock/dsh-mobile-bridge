@@ -39,6 +39,40 @@ export function documentedFields() {
   return fields
 }
 
+/**
+ * 代码里比较过的 `action` / `preset` 取值。
+ *
+ * 只扫 `routes/*.js`：这些是 HTTP 契约的枚举值。`tool.js` 里的取值属于 Agent 工具参数，
+ * 记在 host/README，不该由 API.md 兜。
+ *
+ * 为什么需要这条：0.9.19 之前 API.md 写着 `allow-always`，而 `approvals.js` 只认
+ * `allow-once` / `reject` —— 字段级检查（只比字段名）抓不到这种「枚举值撒谎」。
+ */
+export function collectRouteEnums() {
+  const routesDir = join(REPO, 'host/lib/routes')
+  const map = new Map()
+  for (const file of readdirSync(routesDir).filter((name) => name.endsWith('.js'))) {
+    const text = readFileSync(join(routesDir, file), 'utf8')
+    for (const match of text.matchAll(/(?:action|preset)\s*===\s*'([A-Za-z][A-Za-z0-9_-]*)'/g)) {
+      const value = match[1]
+      if (!map.has(value)) map.set(value, new Set())
+      map.get(value).add(file)
+    }
+  }
+  return map
+}
+
+/** 枚举值审计：路由里比较过的取值必须出现在 API.md。 */
+export function auditRouteEnums() {
+  const code = collectRouteEnums()
+  const doc = readFileSync(docPath, 'utf8')
+  const missing = [...code.entries()]
+    .filter(([value]) => !doc.includes(value))
+    .map(([value, files]) => ({ value, files: [...files].sort() }))
+    .sort((a, b) => a.value.localeCompare(b.value))
+  return { total: code.size, missing }
+}
+
 export function auditApiDoc() {
   const code = collectBodyFields()
   const doc = documentedFields()
@@ -52,13 +86,22 @@ export function auditApiDoc() {
 const isMain = process.argv[1] !== undefined && process.argv[1].endsWith('check-api-doc.mjs')
 if (isMain) {
   const { total, missing } = auditApiDoc()
+  const enums = auditRouteEnums()
   if (process.argv.includes('--json')) {
-    console.log(JSON.stringify({ total, missing }, null, 2))
-  } else if (missing.length === 0) {
-    console.log(`契约一致：${total} 个 body 字段都能在 docs/API.md 里找到`)
+    console.log(JSON.stringify({ total, missing, enums: { total: enums.total, missing: enums.missing } }, null, 2))
   } else {
-    console.log(`✖ ${missing.length} / ${total} 个 body 字段在 docs/API.md 里没有出现：`)
-    for (const item of missing) console.log(`  ${item.field}  ← ${item.files.join(', ')}`)
+    if (missing.length === 0) {
+      console.log(`字段一致：${total} 个 body 字段都能在 docs/API.md 里找到`)
+    } else {
+      console.log(`✖ ${missing.length} / ${total} 个 body 字段在 docs/API.md 里没有出现：`)
+      for (const item of missing) console.log(`  ${item.field}  ← ${item.files.join(', ')}`)
+    }
+    if (enums.missing.length === 0) {
+      console.log(`枚举一致：${enums.total} 个 action/preset 取值都能在 docs/API.md 里找到`)
+    } else {
+      console.log(`✖ ${enums.missing.length} / ${enums.total} 个 action/preset 取值在 docs/API.md 里没有出现：`)
+      for (const item of enums.missing) console.log(`  ${item.value}  ← ${item.files.join(', ')}`)
+    }
   }
-  process.exit(missing.length === 0 ? 0 : 1)
+  process.exit(missing.length === 0 && enums.missing.length === 0 ? 0 : 1)
 }

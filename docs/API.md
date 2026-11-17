@@ -40,12 +40,12 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/setup/state` | 面板状态：`code`/`devices`/`settings`/`compatibility`/`logs`/`workspaces` 等 |
-| GET / POST | `/api/setup/tailscale` | 内嵌节点状态 / 启停与 auth key |
+| GET / POST | `/api/setup/tailscale` | GET 返回节点状态；POST `{action, value?}`，`action` ∈ `enable` / `disable` / `authkey` / `hostname` / `statedir` / `restart` → `{ok, tailscale}` |
 | GET | `/api/setup/logs` | 导出的 `.log`（`?lines=`） |
 | POST | `/api/setup/code` | 空 body → 轮换配对码 |
 | POST | `/api/setup/revoke` | `{deviceId}` 撤销单台设备 |
 | POST | `/api/setup/settings` | 设置项：`phoneFirst` / `discovery` / `approvalTimeoutMs` / `questionTimeoutMs` / `planReviewTimeoutMs` / `collabRoot` / `collabWorkspaceId` / `workspaceRoot` |
-| POST | `/api/setup/group` | `{action, baseUrl?, selfBaseUrl?, code?, deviceId?}`；`action` ∈ `create` / `invite` / `join` / `leave` / `forget`；`join` 的 `selfBaseUrl` 同 `/api/group/link` |
+| POST | `/api/setup/group` | `{action, baseUrl?, selfBaseUrl?, code?, deviceId?}`；`action` ∈ `create` / `invite` / `join` / `leave` / `forget` / `refresh`（`forget` 带 `deviceId`；`refresh` 重新拉一次组状态）；`join` 的 `selfBaseUrl` 同 `/api/group/link` |
 | POST | `/api/setup/reset` | 重置：撤销全部设备并轮换配对码 |
 | POST | `/api/setup/update` | `{force?:boolean}`（`true` 时忽略缓存/节流立即重查）→ `{ok, update}` |
 
@@ -72,7 +72,7 @@
 | POST | `/api/sessions/:id/plan` | **`{active:boolean}`**（不是 `{plan:true}`；用错字段返回 `plan/bad-request` 400「active 必须是布尔值」）→ `{active,status}` |
 | POST | `/api/subscribe` \| `/api/unsubscribe` | `{sessionId}` 订阅流 |
 | GET | `/api/pending` | `{approvals:[...], questions:[...]}` |
-| POST | `/api/approvals/:id` | `{action:'allow-once'\|'allow-always'\|'reject'}` |
+| POST | `/api/approvals/:id` | `{action:'allow-once'\|'reject'}` → `{ok, outcome}`；**`allow-always` 尚未实现**，传它会得到 400 `BAD_ACTION`（见 R27） |
 | POST | `/api/questions/:id` | `{answers:[{id,selected:[],custom?}]}` |
 | GET | `/api/events` | SSE（Bearer 设备 token；peer 403） |
 | GET | `/api/group` | 组状态 + `collabRoot` |

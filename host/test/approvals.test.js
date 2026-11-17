@@ -189,6 +189,53 @@ test('keeps a plan review pending for a phone that is not connected', async () =
   assert.deepEqual(await pending, { answers: [{ id: 'q1', selected: ['Approve'] }] })
 })
 
+test('rejects allow-always: only allow-once and reject are implemented', async () => {
+  // API.md 曾经承诺 allow-always，但实现只认两个值。这条断言把「契约别撒谎」钉住：
+  // 要么实现持久化允许（R27），要么就明确拒绝——绝不能静默接受却没真的记住。
+  const harnessed = harness({ desktop: false })
+  const pending = harnessed.dispatch(
+    'approval/request',
+    { toolName: 'pwsh', callId: 'c-aw', agent: { session: { id: 's-aw' } } },
+    async () => 'desktop'
+  )
+  const snapshot = harnessed.approvals.pendingSnapshot()
+  assert.equal(snapshot.approvals.length, 1)
+  const card = snapshot.approvals[0]
+
+  const result = harnessed.approvals.resolveApproval(card.id, 'allow-always')
+  assert.equal(result.ok, false)
+  assert.equal(result.code, 'BAD_ACTION')
+
+  // 卡片必须还挂着（被拒的 action 不能顺手把卡片结掉）
+  assert.equal(harnessed.approvals.pendingSnapshot().approvals.length, 1)
+
+  // 用合法动作收尾，避免测试里留一个悬挂 promise
+  assert.deepEqual(harnessed.approvals.resolveApproval(card.id, 'allow-once'), { ok: true, outcome: 'allowed-once' })
+  assert.deepEqual(await pending, 'allowed-once')
+})
+
+test('fails closed on timeout: nobody answers means unavailable, never allowed', async () => {
+  // 审批超时必须是 fail-closed。这条最容易在改动 approval 逻辑时被写坏成「默认放行」，
+  // 所以单独钉一条：超时后 waterfall 拿到的是 unavailable，且不会出现 allowed* 的结局。
+  const harnessed = harness({ desktop: false, timeouts: { approvalTimeoutMs: 40 } })
+  const pending = harnessed.dispatch(
+    'approval/request',
+    { toolName: 'pwsh', callId: 'c-timeout', agent: { session: { id: 's-timeout' } } },
+    async () => 'desktop'
+  )
+  assert.equal(harnessed.approvals.pendingSnapshot().approvals.length, 1)
+
+  const result = await pending
+  assert.equal(result, 'unavailable', '超时必须 fail-closed，不能变成 allowed')
+
+  const closed = harnessed.emitted.filter((item) => item.name === 'approval.closed')
+  const outcomes = closed.map((item) => item.data?.outcome ?? item.data?.status ?? null)
+  assert.ok(
+    !outcomes.some((outcome) => typeof outcome === 'string' && outcome.startsWith('allowed')),
+    `超时路径不该产生 allowed 结局，实际：${JSON.stringify(outcomes)}`
+  )
+})
+
 test('returns unavailable when neither a phone nor a desktop is present', async () => {
   const harnessed = harness({ clients: false, desktop: false })
   const result = await harnessed.dispatch('approval/request', { toolName: 'bash', callId: 'c1' }, async () => 'desktop')
