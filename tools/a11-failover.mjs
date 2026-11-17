@@ -44,13 +44,28 @@ function fail(message) {
 }
 
 // 1) 前提检查
+// 移动数据：MIUI 上 settings 的 mobile_data 可能读 0 但数据其实可用，所以再看 rmnet 接口
 const mobileData = adb(['shell', 'settings', 'get', 'global', 'mobile_data']).trim()
-if (mobileData !== '1') fail(`移动数据没开（mobile_data=${mobileData}）：请在手机上下拉打开「移动数据」——adb 改不动它`)
-
 const interfaces = adb(['shell', 'ip', '-4', 'addr', 'show'])
-if (!/tailscale|tun\d/.test(interfaces)) fail('没看到 tailscale/tun 接口：请打开手机上的 Tailscale 并确认已连接')
-const tailnet = (interfaces.match(/inet (100\.\d+\.\d+\.\d+)/) ?? [])[1] ?? '(未取到)'
-console.log(`前提 OK：移动数据已开 · Tailscale 地址 ${tailnet}`)
+const hasCellular = /rmnet/i.test(interfaces)
+if (mobileData !== '1' && !hasCellular) fail(`移动数据没开（mobile_data=${mobileData}，也没看到 rmnet 接口）：请在手机上下拉打开「移动数据」——adb 改不动它`)
+
+// tailnet：内置 tsnet 是用户态实现，不会有 tun 接口；所以两条路都认：
+//   1) 系统里有 tun/tailscale 接口（装了官方 Tailscale 并连接）
+//   2) 我们 App 的内嵌节点已授权（logcat 里能看到 netmap self + machine-authorized）
+const appPid = (() => {
+  try { return adb(['shell', 'pidof', 'com.ts7.dshremote.debug']).trim() } catch { return '' }
+})()
+let tailnet = (interfaces.match(/inet (100\.\d+\.\d+\.\d+)/) ?? [])[1] ?? ''
+if (tailnet === '' && appPid !== '') {
+  const logs = adb(['logcat', '-d', `--pid=${appPid}`])
+  const self = logs.match(/netmap: self:.*auth=machine-authorized[^\n]*?\[(100\.\d+\.\d+\.\d+)/)
+  if (self !== null) tailnet = `${self[1]}（App 内嵌 tsnet）`
+}
+if (tailnet === '' && !/tailscale|tun\d/.test(interfaces)) {
+  fail('没有可用的 tailnet：App 的内嵌 Tailscale 未授权，或系统里没有 Tailscale 连接')
+}
+console.log(`前提 OK：移动数据可用${hasCellular ? '（rmnet 接口在）' : ''} · tailnet ${tailnet || '(接口可见)'}`)
 
 // 2) 关网前先挂定时恢复（setsid + nohup，避免随 shell 退出被回收）
 adb(['shell', `setsid nohup sh -c 'sleep ${RESTORE_DELAY}; svc wifi enable' >/dev/null 2>&1 </dev/null &`])
