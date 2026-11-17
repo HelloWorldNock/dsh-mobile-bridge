@@ -569,7 +569,7 @@ window.__ModuleLoader__.load({
       enabled,
       host,
       dir,
-      key,
+      authKey,
       log,
       open,
       hasKey,
@@ -659,11 +659,11 @@ window.__ModuleLoader__.load({
             style: { width: 200 },
             type: "password",
             autoComplete: "off",
-            value: key,
+            value: authKey,
             placeholder: hasKey ? "已保存" : "tskey-auth-…",
             onChange: (event) => onKeyChange(event.target.value)
           }),
-          h("button", { className: "dmb-btn", disabled: busy !== "" || key.trim() === "", onClick: onKeySave }, busy === "ts-key" ? "保存中…" : "保存密钥"),
+          h("button", { className: "dmb-btn", disabled: busy !== "" || authKey.trim() === "", onClick: onKeySave }, busy === "ts-key" ? "保存中…" : "保存密钥"),
         ),
         ts.error ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, ts.error) : null,
         ts.authUrl
@@ -986,10 +986,10 @@ window.__ModuleLoader__.load({
                 enabled: tsEnabled,
                 host: tsHost,
                 dir: tsDir,
-                key: tsKey,
+                authKey: tsKey,
                 log: tsLog,
                 open: tsOpen,
-                hasKey: Boolean(snap.settings.hasTailscaleAuthKey),
+                hasKey: Boolean(snap.settings?.hasTailscaleAuthKey),
                 onToggle: async (next) => {
                   await post("ts-toggle", "/api/setup/tailscale", { action: next ? "enable" : "disable" })
                 },

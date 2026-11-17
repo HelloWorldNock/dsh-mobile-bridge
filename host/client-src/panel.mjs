@@ -337,10 +337,10 @@ window.__ModuleLoader__.load({
                 enabled: tsEnabled,
                 host: tsHost,
                 dir: tsDir,
-                key: tsKey,
+                authKey: tsKey,
                 log: tsLog,
                 open: tsOpen,
-                hasKey: Boolean(snap.settings.hasTailscaleAuthKey),
+                hasKey: Boolean(snap.settings?.hasTailscaleAuthKey),
                 onToggle: async (next) => {
                   await post("ts-toggle", "/api/setup/tailscale", { action: next ? "enable" : "disable" })
                 },

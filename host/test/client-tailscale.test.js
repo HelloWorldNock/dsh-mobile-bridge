@@ -38,8 +38,13 @@ function findAll(node, predicate, out = []) {
 
 test('TailscaleCard renders node state and wires every write action', () => {
   const created = []
+  // 假 React 要像 React 一样剥掉保留属性（key/ref 不会进 props）——之前没剥，
+  // 所以「把业务字段命名成 key」这个 bug 一直没被测试抓到。
   globalThis.h = (type, props, ...children) => {
-    const node = { type, props: props ?? {}, children }
+    const clean = { ...(props ?? {}) }
+    delete clean.key
+    delete clean.ref
+    const node = { type, props: clean, children }
     created.push(node)
     return node
   }
@@ -63,7 +68,7 @@ test('TailscaleCard renders node state and wires every write action', () => {
       enabled: true,
       host: 'dsh-bridge',
       dir: 'C:\\state',
-      key: '',
+      authKey: '',
       log: ['line-1', 'line-2'],
       open: false,
       hasKey: false,
@@ -123,7 +128,12 @@ test('TailscaleCard renders node state and wires every write action', () => {
 })
 
 test('TailscaleCard expands the log, disables restart when off, and shows the saved-key hint', () => {
-  globalThis.h = (type, props, ...children) => ({ type, props: props ?? {}, children })
+  globalThis.h = (type, props, ...children) => {
+    const clean = { ...(props ?? {}) }
+    delete clean.key
+    delete clean.ref
+    return { type, props: clean, children }
+  }
   try {
     const props = {
       ts: { hostname: 'dsh-bridge', stateDir: '', health: [] },
@@ -132,7 +142,7 @@ test('TailscaleCard expands the log, disables restart when off, and shows the sa
       enabled: false,
       host: '',
       dir: '',
-      key: 'tskey-auth-xyz',
+      authKey: 'tskey-auth-xyz',
       log: ['line-1', 'line-2'],
       open: true,
       hasKey: true,

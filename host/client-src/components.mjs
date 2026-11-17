@@ -414,7 +414,7 @@ export function TailscaleCard({
   enabled,
   host,
   dir,
-  key,
+  authKey,
   log,
   open,
   hasKey,
@@ -504,11 +504,11 @@ export function TailscaleCard({
         style: { width: 200 },
         type: "password",
         autoComplete: "off",
-        value: key,
+        value: authKey,
         placeholder: hasKey ? "已保存" : "tskey-auth-…",
         onChange: (event) => onKeyChange(event.target.value)
       }),
-      h("button", { className: "dmb-btn", disabled: busy !== "" || key.trim() === "", onClick: onKeySave }, busy === "ts-key" ? "保存中…" : "保存密钥"),
+      h("button", { className: "dmb-btn", disabled: busy !== "" || authKey.trim() === "", onClick: onKeySave }, busy === "ts-key" ? "保存中…" : "保存密钥"),
     ),
     ts.error ? h("div", { className: "dmb-alert", style: { marginTop: 10 } }, ts.error) : null,
     ts.authUrl

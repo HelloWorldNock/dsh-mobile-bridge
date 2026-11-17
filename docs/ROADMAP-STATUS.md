@@ -2,7 +2,7 @@
 
 > 这份表是「路线走到哪」的唯一索引：每一项给出**证据位置**与**层级口径**
 > （L1 已实现 / L2 已单测 / L3 已集成 / L4 已真机 / L5 已交付，定义见 [`TESTING.md`](TESTING.md)）。
-> 最近更新：0.9.16。
+> 最近更新：0.9.17。
 
 ## 阶段一：交付收口（R01–R10）
 
@@ -137,5 +137,5 @@ android   : 55 例
              G14 路由契约 · G15 凭据契约 · G12 发布信息；
              需人工：G06/G09/G10/G11 真机 + G04b Release 构建待私钥）
 构建      : assembleDebug 成功（versionCode 36，ABI 三包）；assembleRelease 待私钥后再验
-发布      : 最新 v0.9.16（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
+发布      : 最新 v0.9.17（GitHub Release 含 tgz / 三包 APK / tsnode / SHA256SUMS）
 ```
