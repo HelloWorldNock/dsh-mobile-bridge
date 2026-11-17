@@ -129,8 +129,20 @@ API 层已经脚本化（`node tools/acceptance.mjs`，13 项自动）。剩下�
 签名可疑降级为警告；重启思路：`plugin_manager` 里禁用再启用一次即可（HMR 不会自动重试失败的条目）。
 修完后 `/health` → 0.9.16，`node tools/acceptance.mjs` → **13 通过 / 0 失败 / 9 跳过**（A8 也转绿）。
 
+### 路由拆分留下的两个坑（0.9.17 / 0.9.18 修）
+
+- **0.9.17**：`TailscaleCard` 把业务字段命名成了 React 保留字 `key`，被 `createElement` 剥掉 →
+  渲染时 `key.trim()` 抛错、整个面板报「Cannot read properties of undefined」。
+  测试里的假 React 也顺手改成会剥 `key`/`ref`，否则这类 bug 永远抓不到。
+- **0.9.18**：`/api/events` 的 hello 帧引用了拆分时没注入的 `version`（ReferenceError），
+  且 `routes/sessions.js` 有 **10 处**分支写成裸 `return` 而不是 `return true`，
+  调度器当成「没处理」继续走到 404、在响应头已发出的情况下 `res.end()` →
+  **SSE 一连上就被掐断**，手机端表现为「已连接 / 连接中」反复跳。
+  `if (res.headersSent)` 的兜底以前静默 end，现在会打 error 日志——这次就是靠它定位的。
+  新增回归用例 `event stream delivers hello and stays open`。
+
 ```
-host      : 27 模块 / 185 例（184 过 + 1 集成用例默认跳过）
+host      : 27 模块 / 186 例（185 过 + 1 集成用例默认跳过）
 android   : 55 例
 门禁      : `node tools/gates.mjs` → **8 通过 / 0 失败 / 6 需人工**
             （G01 包一致 · G02 测试含 G07/G08 · G03 语法 · G05 签名 · G13 字段契约 ·
