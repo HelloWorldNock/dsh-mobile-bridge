@@ -259,7 +259,7 @@ export function createSessionRoutes(api) {
           records: history.records.slice(-MAX_HISTORY * 2),
           pending: approvals.pendingSnapshot()
         })
-        return
+        return true
       }
 
       if (method === 'DELETE' && action === null) {
@@ -275,7 +275,7 @@ export function createSessionRoutes(api) {
         broadcast.broadcast('session.removed', { sessionId })
         logger?.info?.(`[mobile-bridge] deleted session ${sessionId} (${removed.length} dirs)`)
         sendJson(res, 200, { deleted: true, filesRemoved: removed.length })
-        return
+        return true
       }
 
       // 归档 / 取消归档：和 PC 端共用 registry 的全局归档集合，手机不再各存一份。
@@ -302,7 +302,7 @@ export function createSessionRoutes(api) {
         // 归档集合本身不发事件，让 hub 立刻对一次账，手机端不用等下一轮轮询。
         hub.syncArchive?.()
         sendJson(res, 200, { archived: archiving })
-        return
+        return true
       }
 
       if (method === 'GET' && action === 'history') {
@@ -319,7 +319,7 @@ export function createSessionRoutes(api) {
           records: page.records.slice(-maxMessages),
           hasMore
         })
-        return
+        return true
       }
 
       if (method === 'POST' && action === 'prompt') {
@@ -339,13 +339,13 @@ export function createSessionRoutes(api) {
           new AbortController().signal
         )
         sendJson(res, 200, { accepted: true })
-        return
+        return true
       }
 
       if (method === 'POST' && action === 'cancel') {
         await sessions.cancel(sessionId)
         sendJson(res, 200, { accepted: true })
-        return
+        return true
       }
 
       if (method === 'POST' && action === 'rename') {
@@ -353,7 +353,7 @@ export function createSessionRoutes(api) {
         const title = cleanTitle(body.title)
         const value = await sessions.rename(sessionId, title)
         sendJson(res, 200, value)
-        return
+        return true
       }
 
       if (method === 'POST' && action === 'permission') {
@@ -372,7 +372,7 @@ export function createSessionRoutes(api) {
         if (session === undefined) throw new BridgeError('session/not-found', '会话不存在或未激活', 404)
         presets.set(session, body.preset)
         sendJson(res, 200, { current: body.preset })
-        return
+        return true
       }
 
       if (method === 'POST' && action === 'plan') {
