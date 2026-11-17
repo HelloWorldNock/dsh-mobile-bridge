@@ -297,18 +297,23 @@ async function main() {
       assert(created.status === 200, `建会话失败：${created.status} ${JSON.stringify(created.body)}`)
       const id = created.body.sessionId
 
-      // 先降到 read-only：会「问审批」的宿主这时才会弹卡（body 是 {preset}，不是 {value}）
+      // 审批是否弹卡取决于「权限预设」里的 approval 字段：
+      //   read-only / workspace-write → approval: ask（会问）
+      //   danger-full-access → approval: never（默认预设，永远不问）
+      // 所以要验 A5 必须先把会话切到 workspace-write，并且让它做**写操作**（读写类低风险命令不会问）。
       const preset = await call(`/api/sessions/${encodeURIComponent(id)}/permission`, {
         method: 'POST',
         auth: true,
-        body: { preset: 'read-only' }
+        body: { preset: 'workspace-write' }
       })
       assert(preset.status === 200, `设置权限预设失败：${preset.status} ${JSON.stringify(preset.body)}`)
 
       const prompted = await call(`/api/sessions/${encodeURIComponent(id)}/prompt`, {
         method: 'POST',
         auth: true,
-        body: { text: '请用 shell 工具执行 echo bridge-approval-test，然后原样回复它的输出。' }
+        body: {
+          text: '请在当前工作区新建一个文件 a5-approval-test.txt，内容写 bridge-approval-test，然后回复“已写入”。'
+        }
       })
       assert(prompted.status === 200, `派 prompt 失败：${prompted.status}`)
 

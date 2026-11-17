@@ -26,7 +26,8 @@
 | **A9 历史图片回显与全屏** | **通过** | 240×160 PNG 会话 → 缩略图（`13-image-session.png`）→ 全屏查看器标注 `240×160`（`14-image-viewer.png`） |
 | **A11 局域网 → tailnet** | **通过** | `tools/a11-failover.mjs --wait 90`：关 Wi-Fi（保留移动数据）后 **+42 秒** `lastSeen` 从 58 秒回落到 1 秒 → 从 tailnet 续连成功；脚本的定时任务把 Wi-Fi 自动开回 |
 | **A12 tailnet → 局域网** | **通过（两段证据）** | ① A11 测试期间 Wi-Fi 关闭时连接确实续在 tailnet 上；② Wi-Fi 恢复后读界面：`53 个会话 · DESKTOP-Q3LRK9H · 局域网` → 已自动回切局域网。未做成单次连续采样，因为**关 Wi-Fi 会同时断掉无线调试**（adb 跑在 Wi-Fi 上），脚本 `tools/a12-return.mjs` 已就绪但需要人工把无线调试重新打开才能跑完整闭环 |
-| A5 审批点按 | 未验 | 本机宿主审批策略是 `never`，不会弹卡（代答通道已由 `--approvals` 验证） |
+| A5 审批点按 | **待验（有明确前置）** | 见下方「A5 到底需要什么」。代答通道本身已由 `--approvals` 验证可用 |
+| ~~A18 NAT 虚拟机自动发现~~ | **弃置** | 需要宿主机 discovery-relay 与虚拟机环境，本轮不验 |
 
 ## 测试方法上的坑（记下来免得重复踩）
 
@@ -53,3 +54,34 @@ node tools/a12-return.mjs  --serial <serial> --tailnet 45 # tailnet → LAN（�
 
 - 测试期间建的两个会话（`DELETE-ME a9-image-test`、`DELETE-ME a15-archive-test`）仍驻留 DSH 内存，重启宿主后可彻底删除。
 - A5（审批点按）需要一台「会问审批」的宿主；A18（NAT 虚拟机自动发现）需要宿主机 discovery-relay 与虚拟机环境。
+
+## A5 到底需要什么
+
+DSH 的审批由**两个插件**配合，缺一不可（读的是安装目录里的 README，版本 0.2.2-rc.3）：
+
+- `@deepseek-ai/dsh-permission-presets`：把「沙箱模式 + 审批策略」打包成**权限预设**。
+  本机的预设表在 `~/.dsh/profiles/desktop/cordis.patch.yml`：
+
+  ```yaml
+  presets:
+    read-only:        { sandbox: read-only,        approval: ask }
+    workspace-write:  { sandbox: workspace-write,  approval: ask }
+    danger-full-access:{ sandbox: danger-full-access, approval: never }
+  defaultPreset: danger-full-access      # ← 默认就是「从不询问」
+  ```
+
+- `@deepseek-ai/dsh-user-approval`：`ask` 会把每次敏感操作交给「回答者」（answerer）；
+  `never` 直接拒绝不询问；**没有回答者时 `ask` 会 fail-closed 变成 `unavailable`**，操作直接失败。
+
+所以 A5 要成立，需要同时满足三条：
+
+1. **会话的审批策略是 `ask`** —— 也就是预设得是 `read-only` 或 `workspace-write`。
+   注意预设表提供的是「新会话的默认值」，当前会话改预设要看 Session projection 是否跟着变；
+   本机默认预设是 `danger-full-access`（`never`），这是 A5 一直不弹卡的根本原因。
+2. **有回答者在线** —— DSH 桌面端审批 UI，或者我们桥接的手机端（`lib/approvals.js` 挂在 `user-approvals/request` 上）。
+3. **触发的是敏感操作** —— 写文件、联网这类；只读命令（`echo`）即使 `ask` 也不会问。
+
+我实测过：`POST /permission {preset:'workspace-write'}` 返回 200，但随后让它「新建 a5-approval-test.txt」仍然没弹卡——
+说明**会话级改预设没有把 approval 这一维从 `never` 切到 `ask`**（预设表只负责新会话默认值）。
+要真正验 A5，最稳的做法是**把 `defaultPreset` 临时改成 `workspace-write`**，开一个新会话再触发写操作；
+验完改回 `danger-full-access` 即可（一行 YAML，可回滚）。
