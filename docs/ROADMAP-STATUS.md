@@ -16,7 +16,7 @@
 | R06 | README + contrib | ✅ | 7 条路由、0.8.6–0.9.x 能力、删 `resync`、Windows 权限描述、五级口径；`contrib/` 跟到最新发布版 |
 | R07 | 三处升版 + Note | ✅ | 每版 `package.json` / `index.js` / `build.gradle.kts` 一致，`docs/RELEASE-*.md` 齐 |
 | R08 | 正式发布 | ✅ | v0.8.9 → v0.9.8 共 10 个 Release，资产含 tgz / 三包 APK / tsnode / SHA256SUMS |
-| R09 | 真机主链路验收 | ◐ 部分 | API 层已脚本化：`tools/acceptance.mjs`（**14 项自动 + 8 项待真机**；`--approvals` 下 A7 计划审阅已实测通过、A5 审批链路按宿主是否触发审批如实记 skip），报告 [`ACCEPTANCE-RESULT-2026-11-17.md`](ACCEPTANCE-RESULT-2026-11-17.md)：12 通过 / 1 失败（A8，运行中的 0.8.8 未重启）/ 9 跳过 |
+| R09 | 真机主链路验收 | ✅（A18 弃置） | API 层 **15 项自动**（含 A5 允许 / A5b 拒绝 / A7 计划审阅，需 `--approvals`）+ 真机 8 项全部实测通过（A9 图片全屏、A10 断线重连、A11/A12 局域网↔tailnet、A15 归档就地取消、A19 前台通知）；A18 NAT 虚拟机发现按用户决定**弃置**。明细见 [`ACCEPTANCE-DEVICE.md`](ACCEPTANCE-DEVICE.md) 与 [`ACCEPTANCE-RESULT-2026-11-18.md`](ACCEPTANCE-RESULT-2026-11-18.md) |
 | R10 | 最小 CI | ✅ | `.github/workflows/ci.yml`：`check.mjs` + `node --test` + 打包后过门禁 + `build-client --check` |
 
 ## 阶段二：可靠性强化（R11–R18）
@@ -43,7 +43,7 @@
 | R23 | `adapters/dsh/` 落地 | ✅ | 会话/工作区适配层，`server.js` 里 0 处直接摸宿主接口 |
 | R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、路由表（含每个 body 的字段）、形状、12 类 SSE、60 个错误码；**G13/G14 守卫**保证「代码里读到的字段一定在文档里」且「代码里的路由与文档路由表双向一致」（`tools/check-api-doc.mjs` / `check-api-routes.mjs` + 两个测试） |
 | R25 | 文档单一事实源 | ✅ | [`API.md`](API.md) / [`INSTALL.md`](INSTALL.md) / [`TESTING.md`](TESTING.md) / [`SECURITY.md`](SECURITY.md) + README 文档地图 |
-| R26 | 签名 + ABI 拆分 | ◐（链路齐、密钥待你生成） | 拆分已生效（单包 65 → 34 MB）；签名链路 + `tools/make-keystore.ps1`（一条命令生成密钥与 properties）+ `tools/verify-apk-signature.ps1`（G05 门禁，已在 debug 包上证到 v1–v4 与 `CN=Android Debug`）。**私钥仍需你本地生成**：本次执行环境禁止创建 `.jks` |
+| R26 | 签名 + ABI 拆分 | ◐（链路齐、密钥待你生成） | 拆分已生效（单包 65 → 34 MB）；签名链路 + `tools/make-keystore.ps1`（一条命令生成密钥与 properties）+ `tools/verify-apk-signature.ps1`（G05 门禁，已在 debug 包上证到 v1–v4 与 `CN=Android Debug`）。**私钥仍需你本地生成**：执行环境的安全策略把 `.jks` 与 `.p12` 都列为敏感路径，无法代生成 |
 | R27 | always-allow / 模型切换 / fork / 子代理控制 | ⏸ | 路线本身标为低优先，等范围决策 |
 
 ## 发版方式（0.9.15 起）
