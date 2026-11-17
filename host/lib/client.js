@@ -83,6 +83,8 @@ window.__ModuleLoader__.load({
     .dmb-switch:checked::after{transform:translateX(16px)}
     .dmb-switch:focus-visible{outline:2px solid #4D6BFE;outline-offset:2px}
     .dmb-alert{border-radius:10px;padding:10px 12px;font-size:12px;background:rgba(220,38,38,.08);color:#DC2626}
+    .dmb-notice{border-radius:10px;padding:10px 12px;font-size:12px;background:rgba(180,83,9,.10);color:#8A5A00}
+    body[data-ds-dark-theme] .dmb-notice{background:rgba(245,158,11,.16);color:#F3C77B}
     .dmb-input{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}
     .dmb-input:focus-visible{outline:2px solid #4D6BFE;outline-offset:1px}
     .dmb-select{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}
@@ -710,10 +712,15 @@ window.__ModuleLoader__.load({
       const fatal = compat.ok !== true
       if (!fatal && warnings.length === 0) return null
       const lines = fatal ? problems : warnings
+      // 只有「真的不兼容」才用红色告警；单纯降级用中性提示，别把可选能力缺失渲染成故障。
       return h(
         "div",
-        { className: "dmb-alert" },
-        h("div", { style: { fontWeight: 600, marginBottom: 4 } }, fatal ? "宿主接口不兼容，部分功能不可用" : "宿主接口有降级"),
+        fatal ? { className: "dmb-alert" } : { className: "dmb-notice" },
+        h(
+          "div",
+          { style: { fontWeight: 600, marginBottom: 4 } },
+          fatal ? "宿主接口不兼容，部分功能不可用" : "宿主接口有降级（不影响主链路）",
+        ),
         h("div", null, String(compat.summary || "")),
         lines.length > 0
           ? h(

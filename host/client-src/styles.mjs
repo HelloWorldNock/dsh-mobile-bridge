@@ -67,6 +67,8 @@ body[data-ds-dark-theme] .dmb-setting .hint{color:#98A4B8}
 .dmb-switch:checked::after{transform:translateX(16px)}
 .dmb-switch:focus-visible{outline:2px solid #4D6BFE;outline-offset:2px}
 .dmb-alert{border-radius:10px;padding:10px 12px;font-size:12px;background:rgba(220,38,38,.08);color:#DC2626}
+.dmb-notice{border-radius:10px;padding:10px 12px;font-size:12px;background:rgba(180,83,9,.10);color:#8A5A00}
+body[data-ds-dark-theme] .dmb-notice{background:rgba(245,158,11,.16);color:#F3C77B}
 .dmb-input{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}
 .dmb-input:focus-visible{outline:2px solid #4D6BFE;outline-offset:1px}
 .dmb-select{width:100%;padding:7px 9px;border-radius:8px;border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;font:inherit;font-size:13px}

@@ -61,10 +61,15 @@ window.__ModuleLoader__.load({
       const fatal = compat.ok !== true
       if (!fatal && warnings.length === 0) return null
       const lines = fatal ? problems : warnings
+      // 只有「真的不兼容」才用红色告警；单纯降级用中性提示，别把可选能力缺失渲染成故障。
       return h(
         "div",
-        { className: "dmb-alert" },
-        h("div", { style: { fontWeight: 600, marginBottom: 4 } }, fatal ? "宿主接口不兼容，部分功能不可用" : "宿主接口有降级"),
+        fatal ? { className: "dmb-alert" } : { className: "dmb-notice" },
+        h(
+          "div",
+          { style: { fontWeight: 600, marginBottom: 4 } },
+          fatal ? "宿主接口不兼容，部分功能不可用" : "宿主接口有降级（不影响主链路）",
+        ),
         h("div", null, String(compat.summary || "")),
         lines.length > 0
           ? h(

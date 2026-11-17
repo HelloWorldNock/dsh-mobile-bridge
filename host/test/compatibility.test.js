@@ -24,6 +24,7 @@ function fullHost(overrides = {}) {
     on: () => () => {},
     get: (name) =>
       ({
+        attachments: {},
         typertGateway: {},
         commands: {},
         permissionPresets: {},

@@ -525,7 +525,10 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
     attachmentsService,
     assertPeerWorkspace,
     assertPeerSession,
-    state
+    state,
+    // SSE 的 hello 帧要报版本；拆分路由时漏了这一项，导致 /api/events 一连上就抛
+    // ReferenceError 被静默 end（手机端表现为「已连接/连接中」反复跳）。
+    version
   })
 
   const connectionRoutes = createConnectionRoutes({
@@ -691,6 +694,9 @@ export function createBridgeServer({ config, state, auth, broadcast, hub, approv
   function handler(req, res) {
     void route(req, res).catch((error) => {
       if (res.headersSent) {
+        // 头已经发出去了（典型是 SSE）：这里以前是静默 res.end()，
+        // 结果「流刚连上就断」在日志里完全看不到——手机端就表现为一直重连。
+        logger?.error?.(`[mobile-bridge] request failed after headers sent: ${error?.stack ?? String(error)}`)
         try {
           res.end()
         } catch {

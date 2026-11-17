@@ -36,6 +36,9 @@ export function createSessionRoutes(api) {
     matchWorkspace,
     ensureAgent,
     agentService,
+    // SSE 的 hello 帧要报版本：R21 拆分路由时漏了注入，导致 /api/events 一连上就抛
+    // ReferenceError 并被静默 end（手机端表现为「已连接/连接中」反复跳）。
+    version,
     inspectRecords,
     rememberImageRefs,
     loadImageRefs,
@@ -107,7 +110,7 @@ export function createSessionRoutes(api) {
       const presets = service('permissionPresets')
       const catalog = presets?.catalog?.() ?? { options: [], defaultPreset: null }
       sendJson(res, 200, catalog)
-      return
+      return true
     }
 
     if (method === 'GET' && path === '/api/sessions') {
@@ -117,7 +120,7 @@ export function createSessionRoutes(api) {
         items = items.filter((item) => `${item.title ?? ''} ${item.cwd ?? ''}`.toLowerCase().includes(query))
       }
       sendJson(res, 200, { sessions: items })
-      return
+      return true
     }
 
     if (method === 'POST' && path === '/api/sessions') {
@@ -206,7 +209,7 @@ export function createSessionRoutes(api) {
         }
       }
       sendJson(res, 200, { sessionId, agentPreset: session.agentPreset ?? null, resumed, warnings })
-      return
+      return true
     }
 
     // 历史图片的原始字节：手机按 (seq, 图片序号) 取，序号与时间线里的 images[].index 一致。
@@ -238,7 +241,7 @@ export function createSessionRoutes(api) {
         'x-content-type-options': 'nosniff'
       })
       res.end(bytes)
-      return
+      return true
     }
 
     const sessionMatch = /^\/api\/sessions\/([^/]+)(?:\/([a-z]+))?$/.exec(path)
@@ -400,7 +403,7 @@ export function createSessionRoutes(api) {
       if (typeof body.sessionId !== 'string') throw new BridgeError('subscribe/bad-request', '缺少 sessionId', 400)
       await hub.subscribe(body.sessionId)
       sendJson(res, 200, { subscribed: true })
-      return
+      return true
     }
 
     if (method === 'POST' && path === '/api/unsubscribe') {
@@ -408,12 +411,12 @@ export function createSessionRoutes(api) {
       if (typeof body.sessionId !== 'string') throw new BridgeError('subscribe/bad-request', '缺少 sessionId', 400)
       hub.unsubscribe(body.sessionId)
       sendJson(res, 200, { subscribed: false })
-      return
+      return true
     }
 
     if (method === 'GET' && path === '/api/pending') {
       sendJson(res, 200, approvals.pendingSnapshot())
-      return
+      return true
     }
 
     const approvalMatch = /^\/api\/approvals\/([^/]+)$/.exec(path)
@@ -422,7 +425,7 @@ export function createSessionRoutes(api) {
       const result = approvals.resolveApproval(decodeURIComponent(approvalMatch[1]), body.action)
       if (!result.ok) throw new BridgeError(result.code, result.message, result.code === 'NOT_FOUND' ? 404 : 400)
       sendJson(res, 200, result)
-      return
+      return true
     }
 
     const questionMatch = /^\/api\/questions\/([^/]+)$/.exec(path)
@@ -431,7 +434,7 @@ export function createSessionRoutes(api) {
       const result = approvals.resolveQuestion(decodeURIComponent(questionMatch[1]), body.answers)
       if (!result.ok) throw new BridgeError(result.code, result.message, result.code === 'NOT_FOUND' ? 404 : 400)
       sendJson(res, 200, result)
-      return
+      return true
     }
 
     if (method === 'GET' && path === '/api/events') {
@@ -454,7 +457,7 @@ export function createSessionRoutes(api) {
       res.on('close', () => {
         approvals.revalidate()
       })
-      return
+      return true
     }
   }
 }

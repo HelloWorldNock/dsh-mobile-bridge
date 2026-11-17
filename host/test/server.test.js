@@ -397,6 +397,38 @@ test('hides archived sessions and keeps them out of workspace grouping', async (
   }
 })
 
+test('event stream delivers hello and stays open', async () => {
+  // 回归用例：R21 拆路由后 /api/events 的处理分支用了裸 return（不是 return true），
+  // 调度器会当成「没处理」继续走到 404；响应头已发出，于是流被立刻 end，
+  // 手机端表现为「已连接 / 连接中」反复跳。这里把「hello 到达 + 连接不被立刻关掉」钉住。
+  const app = await boot()
+  const controller = new AbortController()
+  try {
+    const response = await fetch(`${app.base}/api/events`, {
+      headers: { accept: 'text/event-stream', ...authHeaders(app.token) },
+      signal: controller.signal
+    })
+    assert.equal(response.status, 200)
+    assert.match(response.headers.get('content-type') ?? '', /text\/event-stream/)
+
+    const reader = response.body.getReader()
+    const first = await reader.read()
+    const frame = Buffer.from(first.value ?? []).toString('utf8')
+    assert.match(frame, /event: hello/)
+    assert.match(frame, /0\.1\.0-test/)
+
+    // 再等一会儿：流必须还开着（不能被紧随其后的 404 关掉）
+    const second = await Promise.race([
+      reader.read().then(() => 'chunk'),
+      new Promise((resolve) => setTimeout(() => resolve('still-open'), 250))
+    ])
+    assert.equal(second, 'still-open')
+  } finally {
+    controller.abort()
+    await app.close()
+  }
+})
+
 test('archives and restores a session from the phone', async () => {
   const app = await boot()
   try {

@@ -35,13 +35,16 @@ const HOST_SURFACE = [
   { id: 'on', path: ['on'], kind: 'function', required: true },
   { id: 'get', path: ['get'], kind: 'function', required: true },
   { id: 'effect', path: ['effect'], kind: 'function', required: false },
-  { id: 'logger', path: ['logger'], kind: 'any', required: false },
-  { id: 'slots', path: ['slots'], kind: 'object', required: false },
-  { id: 'attachments', path: ['attachments'], kind: 'object', required: false }
+  { id: 'logger', path: ['logger'], kind: 'any', required: false }
+  // 这里刻意不探测 slots / attachments：
+  //  - slots 只有客户端 bundle 用（它在自己的 inject 里声明），宿主侧从不读；
+  //  - attachments 我们走 ctx.get('attachments')，不是属性访问，放到 OPTIONAL_SERVICES 里探。
+  // 之前按属性探测这两项，在 DSH 0.2.2 的严格代理下会被记成「降级」，属于误报。
 ]
 
 /** 桥接通过 ctx.get(名称) 取的可选服务；缺哪个就少哪块功能。 */
 const OPTIONAL_SERVICES = [
+  { name: 'attachments', impact: '历史消息里的图片读不出来（时间线照常显示）' },
   { name: 'typertGateway', impact: '审批/提问的事件投影退化（手机卡片仍可用，但计划正文可能为空）' },
   { name: 'commands', impact: '计划模式开关（/plan）不可用' },
   { name: 'permissionPresets', impact: '新建任务页的权限预设列表为空' },
