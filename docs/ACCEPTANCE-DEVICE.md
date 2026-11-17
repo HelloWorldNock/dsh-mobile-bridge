@@ -1,4 +1,4 @@
-# 真机验收（R09 · 设备侧）
+﻿# 真机验收（R09 · 设备侧）
 
 > API 层 13 项由 `tools/acceptance.mjs` 自动化（最近：**13 通过 / 0 失败 / 9 跳过**）。这里只记「必须有真机」的部分。
 > 最近更新：2026-11-17 23:30（宿主 0.9.18 + 手机端 0.9.18-debug，adb 无线调试驱动）。
@@ -24,7 +24,7 @@
 | **A19 前台服务与通知** | **通过** | `dumpsys notification`：`channel=dsh_connection`、`flags=FOREGROUND_SERVICE` 常驻通知；另有「任务完成 · 仅回复收到」通知（`06-notification.png`） |
 | **A15 归档 → 手机就地取消归档** | **通过** | 电脑端 `POST /api/sessions/:id/archive` → 手机会话页出现横幅「这个任务已归档…点右上角菜单『取消归档』可以放回去」（`10-archived-banner.png`）；点右上菜单 → 「取消归档」→ 确认弹窗（`11-menu.png`）→ 主机侧 `archivedSessionIds` **已移除该会话**（`12-unarchived.png`） |
 | **A9 历史图片回显与全屏** | **通过** | 用带图 prompt 建会话（240×160 PNG）→ 手机时间线显示缩略图（`13-image-session.png`）→ 点缩略图弹出全屏查看器，标注 `240×160`（`14-image-viewer.png`） |
-| **A11 局域网 → tailnet** | **待复测** | 首次测得关 Wi-Fi 后 2 分钟未切 tailnet（`lastSeen` 停更 + `stream detached`）；用户反馈当时有手动介入，需在「手机端 Tailscale 已登录」的前提下重跑 |
+| **A11 局域网 → tailnet** | **失败（复测确认）** | 第二次复测：关 Wi-Fi 后连续采样 70 秒，主机侧 `lastSeen` 只增不减（29→94 秒），**没有走 tailnet 重连**；随后 170 秒仍无上报。待确认手机是否装了 Tailscale 并登录——若没有，属环境不具备而非缺陷 |
 | A5 审批点按 | 未验 | 本机宿主审批策略是 `never`，不会弹卡（代答通道已由 `--approvals` 验证） |
 
 ## 测试方法上的坑（记下来免得重复踩）
