@@ -51,7 +51,7 @@ ASCII 路径的 junction（`C:\dshproj`、`C:\dshgh`）再从那里跑；纯 ASC
 | G03 | Host 语法检查 | `cd host && node scripts/check.mjs` | 每次发版必过 |
 | G04 | Android 构建 | `cd android && .\gradlew.bat :app:assembleDebug`（现按 ABI 拆成 arm64-v8a / x86_64 / universal 三个包） | 每次发版必过 |
 | G00 | 插件在宿主里真的加载了 | 设置 → 插件：`mobile-bridge` 的 `fiberPhase` 必须是 `active`；`/health` 必须回版本号 | 每次宿主升级后先看一眼 |
-| G04b | Release 构建（需密钥） | 先 `powershell -File tools/make-keystore.ps1` 生成密钥与 `android/keystore.properties`，再 `:app:assembleRelease` | 发 release 包时 |
+| G04b | Release 构建 | `cd android && .\gradlew.bat :app:assembleRelease`：**无密钥时产出未签名包**（实测 arm64 33.1 / x86_64 34.6 / universal 55.4 MB，versionCode 40，ABI 拆分正确，`apksigner` 报 `Missing META-INF/MANIFEST.MF`）；有 `android/keystore.properties` 时自动签名 | 发 release 包时 |
 | G05 | 签名验证 | `powershell -File tools/verify-apk-signature.ps1`（默认校验 `dist/` 里最新的 debug 包；签名方案、证书 DN、SHA-256 一并打印，未签名则退出码 1）。发布包加 `-ExpectCommonName "CN=…"` 断言用自己的证书 | ✅ 可执行 |
 | G06 | 凭据保护 | 真机读 `shared_prefs` 无明文 | R14 已完成代码，真机待验 |
 | G07 | 鉴权审计 | 路由鉴权矩阵测试 | ✅ |

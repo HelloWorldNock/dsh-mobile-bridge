@@ -43,7 +43,7 @@
 | R23 | `adapters/dsh/` 落地 | ✅ | 会话/工作区适配层，`server.js` 里 0 处直接摸宿主接口 |
 | R24 | API 契约文档 | ✅ | [`API.md`](API.md)：四层鉴权、路由表（含每个 body 的字段）、形状、12 类 SSE、60 个错误码；**G13/G14 守卫**保证「代码里读到的字段一定在文档里」且「代码里的路由与文档路由表双向一致」（`tools/check-api-doc.mjs` / `check-api-routes.mjs` + 两个测试） |
 | R25 | 文档单一事实源 | ✅ | [`API.md`](API.md) / [`INSTALL.md`](INSTALL.md) / [`TESTING.md`](TESTING.md) / [`SECURITY.md`](SECURITY.md) + README 文档地图 |
-| R26 | 签名 + ABI 拆分 | ◐（链路齐、密钥待你生成） | 拆分已生效（单包 65 → 34 MB）；签名链路 + `tools/make-keystore.ps1`（一条命令生成密钥与 properties）+ `tools/verify-apk-signature.ps1`（G05 门禁，已在 debug 包上证到 v1–v4 与 `CN=Android Debug`）。**私钥仍需你本地生成**：执行环境的安全策略把 `.jks` 与 `.p12` 都列为敏感路径，无法代生成 |
+| R26 | 签名 + ABI 拆分 | ◐（链路齐、密钥待你生成） | 拆分已生效（单包 65 → 34 MB）；签名链路 + `tools/make-keystore.ps1`（一条命令生成密钥与 properties）+ `tools/verify-apk-signature.ps1`（G05 门禁，已在 debug 包上证到 v1–v4 与 `CN=Android Debug`）。**私钥仍需你本地生成**：执行环境的安全策略把 `.jks` 与 `.p12` 都列为敏感路径，无法代生成。release 构建链路已实测：`assembleRelease` 成功产出三个**未签名**包（arm64 33.1 MB / x86_64 34.6 MB / universal 55.4 MB，versionCode 40），`aapt2` 确认 arm64 包只含 `arm64-v8a`、universal 含四 ABI，`apksigner` 报 `DOES NOT VERIFY / Missing META-INF/MANIFEST.MF`（证明确实未签，不是假签）|
 | R27 | always-allow / 模型切换 / fork / 子代理控制 | ⏸ | 路线本身标为低优先，等范围决策 |
 
 ## 发版方式（0.9.15 起）
