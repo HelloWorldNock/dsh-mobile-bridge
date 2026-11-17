@@ -11,6 +11,27 @@ import { createDefaultState } from '../lib/state.js'
 import { createGroup } from '../lib/group.js'
 import { createLogSink } from '../lib/logs.js'
 
+/**
+ * 取一个「fetch 敢连」的端口。
+ *
+ * 直接用 `port: 0` 会偶发拿到 undici 的 bad-port 名单里的端口（6000 / 6665–6669 / 10080 …）：
+ * 服务端能 listen，但测试里 `fetch` 直接抛 `bad port`。这里先探一个端口再排除。
+ */
+const BAD_PORTS = new Set([1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049, 3659, 4045, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6697, 10080])
+
+async function safePort() {
+  const net = await import('node:net')
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const probe = net.createServer()
+    await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve))
+    const address = probe.address()
+    const port = typeof address === 'object' && address !== null ? address.port : 0
+    await new Promise((resolve) => probe.close(resolve))
+    if (port > 0 && !BAD_PORTS.has(port)) return port
+  }
+  return 0
+}
+
 async function boot(options = {}) {
   const state = createDefaultState()
   const auth = createAuth({ state, save: async () => undefined, settings: state.settings, logger: { warn() {} } })
@@ -141,7 +162,7 @@ async function boot(options = {}) {
       archiveSyncs += 1
     }
   }
-  const config = { port: 0, discoveryPort: 0, bindHost: '127.0.0.1' }
+  const config = { port: await safePort(), discoveryPort: 0, bindHost: '127.0.0.1' }
   const group = createGroup({
     state,
     save: async () => undefined,

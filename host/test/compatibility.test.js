@@ -69,13 +69,15 @@ test('prompt 被换成非函数：签名不符要报出来', () => {
   assert.ok(report.problems.some((line) => line.includes('期望 function')))
 })
 
-test('cancel 少参数（签名漂了）：按必需项报错', () => {
+test('cancel 少参数（签名漂了）：只降级，不判为不可用', () => {
   const host = fullHost()
   host.sessionController = { ...host.sessionController, cancel: async () => {} }
   const report = checkHostCompatibility(host)
-  assert.equal(report.ok, false)
-  assert.equal(statusOf(report, 'sessionController.cancel'), 'mismatch')
-  assert.ok(report.problems.some((line) => line.includes('签名可疑')))
+  // 0.2.2 起 cancel/rename 改成「单个对象参数」，老版本是位置参数；适配层统一按对象调用，
+  // 两种都能工作，所以 Function.length 只能当提示，不能当成「必需接口坏了」。
+  assert.equal(report.ok, true)
+  assert.equal(statusOf(report, 'sessionController.cancel'), 'degraded')
+  assert.ok(report.warnings.some((line) => line.includes('签名可疑')))
 })
 
 test('resolveByPath 是同步实现：只降级，不算失败', () => {

@@ -15,10 +15,10 @@
 const HOST_SURFACE = [
   // 会话控制器：任务列表 / 发 prompt / 停止 / 重命名 / 新建
   { id: 'sessionController', path: ['sessionController'], kind: 'object', required: true },
-  { id: 'sessionController.list', path: ['sessionController', 'list'], kind: 'function', required: true, minArgs: 0, maxArgs: 1 },
-  { id: 'sessionController.prompt', path: ['sessionController', 'prompt'], kind: 'function', required: true, minArgs: 2, maxArgs: 4 },
-  { id: 'sessionController.cancel', path: ['sessionController', 'cancel'], kind: 'function', required: true, minArgs: 1, maxArgs: 2 },
-  { id: 'sessionController.rename', path: ['sessionController', 'rename'], kind: 'function', required: true, minArgs: 2, maxArgs: 3 },
+  { id: 'sessionController.list', path: ['sessionController', 'list'], kind: 'function', required: true, minArgs: 0, maxArgs: 3 },
+  { id: 'sessionController.prompt', path: ['sessionController', 'prompt'], kind: 'function', required: true, minArgs: 1, maxArgs: 5 },
+  { id: 'sessionController.cancel', path: ['sessionController', 'cancel'], kind: 'function', required: true, minArgs: 1, maxArgs: 3 },
+  { id: 'sessionController.rename', path: ['sessionController', 'rename'], kind: 'function', required: true, minArgs: 1, maxArgs: 3 },
   { id: 'sessionController.create', path: ['sessionController', 'create'], kind: 'function', required: false, minArgs: 0, maxArgs: 3 },
   { id: 'sessionController.resolveAgent', path: ['sessionController', 'resolveAgent'], kind: 'function', required: false },
   { id: 'sessionController.follow', path: ['sessionController', 'follow'], kind: 'function', required: false, minArgs: 1, maxArgs: 3 },
@@ -35,7 +35,7 @@ const HOST_SURFACE = [
   { id: 'on', path: ['on'], kind: 'function', required: true },
   { id: 'get', path: ['get'], kind: 'function', required: true },
   { id: 'effect', path: ['effect'], kind: 'function', required: false },
-  { id: 'logger', path: ['logger'], kind: 'object', required: false },
+  { id: 'logger', path: ['logger'], kind: 'any', required: false },
   { id: 'slots', path: ['slots'], kind: 'object', required: false },
   { id: 'attachments', path: ['attachments'], kind: 'object', required: false }
 ]
@@ -48,11 +48,23 @@ const OPTIONAL_SERVICES = [
   { name: 'sessions', impact: '会话元数据的补充字段缺失' }
 ]
 
+/**
+ * 读一条属性链。
+ *
+ * DSH 0.2.2 起，宿主把「没写进 `inject` 的服务」做成严格代理：读 `ctx.slots` 这种
+ * 未声明的服务会**直接抛** `cannot get property "slots" without inject`，而不是返回
+ * undefined。探针本身因此可能把整个 `apply` 带崩——这恰恰是它要发现的那类问题，
+ * 所以这里逐级 try/catch：抛错就按「不可读」处理，并把原因带回去。
+ */
 function readPath(ctx, path) {
   let cursor = ctx
   for (const key of path) {
     if (cursor === null || cursor === undefined) return { found: false, value: undefined, at: key }
-    cursor = cursor[key]
+    try {
+      cursor = cursor[key]
+    } catch (error) {
+      return { found: false, value: undefined, at: key, strict: String(error?.message ?? error) }
+    }
   }
   return { found: cursor !== undefined && cursor !== null, value: cursor }
 }
@@ -64,15 +76,16 @@ function describe(value) {
 }
 
 function checkOne(ctx, spec) {
-  const { found, value } = readPath(ctx, spec.path)
+  const { found, value, strict } = readPath(ctx, spec.path)
   const where = spec.path.join('.')
   if (!found) {
+    const strictNote = strict === undefined ? '' : '（宿主严格模式：未写进 inject 的服务不可读）'
     return {
       id: spec.id,
       where,
       required: spec.required,
       status: spec.required ? 'missing' : 'degraded',
-      detail: spec.required ? '宿主没有这个接口' : '宿主没有这个接口，相关功能降级'
+      detail: (spec.required ? '宿主没有这个接口' : '宿主没有这个接口，相关功能降级') + strictNote
     }
   }
   if (spec.kind === 'function' && typeof value !== 'function') {
@@ -82,8 +95,9 @@ function checkOne(ctx, spec) {
     return { id: spec.id, where, required: spec.required, status: 'mismatch', detail: `期望 object，实际 ${describe(value)}` }
   }
   if (spec.kind === 'function' && (spec.minArgs !== undefined || spec.maxArgs !== undefined)) {
-    // Function.length 只数到第一个默认值/剩余参数为止，所以只做「明显不符」的判断：
-    // 少于下限说明参数被合并/删除；正好为 0 且期望带参，说明签名漂了。
+    // Function.length 只数到第一个默认值/剩余参数为止，所以只做「明显不符」的判断。
+    // 而且它只是提示：DSH 0.2.2 把 cancel/rename 换成「单个对象参数」，老版本是位置参数，
+    // 两种都能工作（适配层统一成对象调用）——所以签名可疑只降级、不当成不可用。
     const arity = value.length
     const belowMin = spec.minArgs !== undefined && arity < spec.minArgs
     const aboveMax = spec.maxArgs !== undefined && arity > spec.maxArgs
@@ -92,8 +106,8 @@ function checkOne(ctx, spec) {
         id: spec.id,
         where,
         required: spec.required,
-        status: spec.required ? 'mismatch' : 'degraded',
-        detail: `签名可疑：声明 ${arity} 个参数，期望 ${spec.minArgs ?? 0}–${spec.maxArgs ?? '∞'}`
+        status: 'degraded',
+        detail: `签名可疑：声明 ${arity} 个参数，期望 ${spec.minArgs ?? 0}–${spec.maxArgs ?? '∞'}（适配层按对象参数调用，仍可工作）`
       }
     }
     if (spec.id === 'workspaceRegistry.resolveByPath' && value.constructor?.name !== 'AsyncFunction') {
