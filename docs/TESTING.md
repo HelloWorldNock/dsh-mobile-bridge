@@ -10,8 +10,8 @@
 | Android 数据层 | `powershell -File tools/test-android.ps1` | **55 例** | 配对记录、选路、待办合并、重连节奏、明文白名单、明文→加密迁移、连接路由决策、会话与时间线折叠、时间线行折叠与纯文本导出 |
 | 真实宿主契约 | `cd host && $env:DSH_BRIDGE_INTEGRATION='1'; node --test test/integration/prompt.test.js` | 1 例（默认跳过） | 对运行中的桥接跑真 prompt 并核对历史落盘 |
 | 真机验收（设备侧） | ode tools/device-matrix.mjs --only A15 --wait 120 | 见 [ACCEPTANCE-DEVICE.md](ACCEPTANCE-DEVICE.md) | 需要手机上点一次；脚本负责主机侧动作并回读结果 |
-| 验收矩阵（API 层） | `node tools/acceptance.mjs --out docs/ACCEPTANCE-RESULT-x.md` | 14 项自动（A5/A7 需 `--approvals`）+ 8 项待真机 | 配对/鉴权/列表/建会话/归档/取消归档/日志/图片校验/彻底删除/事件流鉴权；结果可归档 |
-| 审批链路（实验） | `node tools/acceptance.mjs --only A5 --approvals` | opt-in · 本机 skip | 建会话→**先设 `read-only` 预设**→让模型调一次 shell→脚本代答 `allow-once`→核对输出落盘。本机实测：即使 read-only 宿主也直接执行（审批策略是 never），所以如实记 skip；要验这条得在一台「会问审批」的宿主上跑 |
+| 验收矩阵（API 层） | `node tools/acceptance.mjs --approvals --out docs/ACCEPTANCE-RESULT-x.md` | 15 项自动 + 3 项 opt-in（A5 允许 / A5b 拒绝 / A7 计划审阅）+ 8 项待真机 | 配对/鉴权/列表/建会话/归档/取消归档/日志/图片校验/彻底删除/事件流鉴权；结果可归档 |
+| 审批链路（允许/拒绝） | `node tools/acceptance.mjs --only A5,A5b --approvals` | ✅ 需预设 `workspace-write` | 建会话→**先设 `read-only` 预设**→让模型调一次 shell→脚本代答 `allow-once`→核对输出落盘。本机实测：即使 read-only 宿主也直接执行（审批策略是 never），所以如实记 skip；要验这条得在一台「会问审批」的宿主上跑 |
 | 计划审阅（已自动化） | `node tools/acceptance.mjs --only A7 --approvals` | opt-in · 实测通过 | 建会话 → `POST plan {active:true}` → 派 prompt → 抓 `planReview:true` 卡 → 只答「Keep planning」（不批准执行，避免真改文件）。实测拿到 2945 字计划并成功代答 |
 
 `node --test` 里那 1 条"跳过"就是集成用例：没设 `DSH_BRIDGE_INTEGRATION=1` 时它不会去动你的 DSH。

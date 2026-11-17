@@ -26,7 +26,8 @@
 | **A9 历史图片回显与全屏** | **通过** | 240×160 PNG 会话 → 缩略图（`13-image-session.png`）→ 全屏查看器标注 `240×160`（`14-image-viewer.png`） |
 | **A11 局域网 → tailnet** | **通过** | `tools/a11-failover.mjs --wait 90`：关 Wi-Fi（保留移动数据）后 **+42 秒** `lastSeen` 从 58 秒回落到 1 秒 → 从 tailnet 续连成功；脚本的定时任务把 Wi-Fi 自动开回 |
 | **A12 tailnet → 局域网** | **通过（两段证据）** | ① A11 测试期间 Wi-Fi 关闭时连接确实续在 tailnet 上；② Wi-Fi 恢复后读界面：`53 个会话 · DESKTOP-Q3LRK9H · 局域网` → 已自动回切局域网。未做成单次连续采样，因为**关 Wi-Fi 会同时断掉无线调试**（adb 跑在 Wi-Fi 上），脚本 `tools/a12-return.mjs` 已就绪但需要人工把无线调试重新打开才能跑完整闭环 |
-| A5 审批点按 | **待验（有明确前置）** | 见下方「A5 到底需要什么」。代答通道本身已由 `--approvals` 验证可用 |
+| **A5 审批·允许** | **通过** | `node tools/acceptance.mjs --only A5 --approvals`：模型要做「工作区外写文件」→ 审批卡 `ap_…` 进 `/api/pending` → 脚本代答 `allow-once` → 目标文件**已创建**（内容 `bridge-approval-test`），跑完自动清理 |
+| **A5b 审批·拒绝** | **通过** | 同流程把代答改成 `reject` → 目标文件**未被创建**，证明「不批准则不执行」 |
 | ~~A18 NAT 虚拟机自动发现~~ | **弃置** | 需要宿主机 discovery-relay 与虚拟机环境，本轮不验 |
 
 ## 测试方法上的坑（记下来免得重复踩）
@@ -81,7 +82,18 @@ DSH 的审批由**两个插件**配合，缺一不可（读的是安装目录里
 2. **有回答者在线** —— DSH 桌面端审批 UI，或者我们桥接的手机端（`lib/approvals.js` 挂在 `user-approvals/request` 上）。
 3. **触发的是敏感操作** —— 写文件、联网这类；只读命令（`echo`）即使 `ask` 也不会问。
 
-我实测过：`POST /permission {preset:'workspace-write'}` 返回 200，但随后让它「新建 a5-approval-test.txt」仍然没弹卡——
-说明**会话级改预设没有把 approval 这一维从 `never` 切到 `ask`**（预设表只负责新会话默认值）。
-要真正验 A5，最稳的做法是**把 `defaultPreset` 临时改成 `workspace-write`**，开一个新会话再触发写操作；
-验完改回 `danger-full-access` 即可（一行 YAML，可回滚）。
+我实测过：工作区内新建文件、`echo` 这类动作**都在沙箱允许范围内**，即使预设是 `workspace-write` 也不会问。
+真正会触发 `ask` 的是**越界动作**——例如把文件写到工作区之外，此时 reason 会是
+`escalate sandbox to danger-full-access`。
+
+### 已经验过的做法（2026-11-18 00:25，A5 / A5b 均通过）
+
+1. 备份并把 `~/.dsh/profiles/desktop/cordis.patch.yml` 的 `defaultPreset` 改成 `workspace-write`
+   （DSH 的 HMR 会立刻重载，`/api/permission-presets` 马上返回新默认值）；
+2. 跑 `node tools/acceptance.mjs --approvals`：
+   - **A5**：卡片 `ap_…` 出现 → 代答 `allow-once` → `%USERPROFILE%\a5-approval-test.txt` 被创建（内容对得上）→ 自动清理；
+   - **A5b**：同样的越界动作 → 代答 `reject` → 目标文件**不存在**；
+3. 验完从备份恢复 `defaultPreset: danger-full-access`，并确认新会话的 `permission` 回到 `danger-full-access`。
+
+全量矩阵（含审批）：**15 通过 / 0 失败 / 8 跳过**，报告见
+[`ACCEPTANCE-RESULT-2026-11-18.md`](ACCEPTANCE-RESULT-2026-11-18.md)。

@@ -33,7 +33,8 @@ let deviceId = ''
 let hostVersion = null
 
 function shouldRun(id) {
-  return ONLY === null || ONLY.includes(id)
+  // ONLY 会被统一转成大写，所以这里也要按大写比，否则 A5b / A1b 这类带小写的项永远筛不出来
+  return ONLY === null || ONLY.includes(id.toUpperCase())
 }
 
 async function call(path, { method = 'GET', body, auth = false } = {}) {
@@ -312,7 +313,9 @@ async function main() {
         method: 'POST',
         auth: true,
         body: {
-          text: '请在当前工作区新建一个文件 a5-approval-test.txt，内容写 bridge-approval-test，然后回复“已写入”。'
+          // 关键：动作必须**超出沙箱**才会触发 ask。工作区内写文件是沙箱放行的，不会弹卡；
+          // 写工作区外（用户主目录）会要求「提升沙箱到 danger-full-access」，approval: ask 才生效。
+          text: `请用 shell 工具把文本 bridge-approval-test 写到工作区之外：${process.env.USERPROFILE}\\a5-approval-test.txt，写完回复“已写入”。`
         }
       })
       assert(prompted.status === 200, `派 prompt 失败：${prompted.status}`)
@@ -360,10 +363,62 @@ async function main() {
         if (row === undefined) continue
         running = row.running === true
       }
-      const history = await call(`/api/sessions/${encodeURIComponent(id)}/history`, { auth: true })
-      const historyText = JSON.stringify(history.body.records ?? [])
-      const ran = historyText.includes('bridge-approval-test')
-      return `卡片 ${card.id.slice(0, 10)}… 已 allow-once；工具输出${ran ? '已' : '未'}落盘`
+      // 批准之后工具才应该真正执行：验证工作区外的文件确实被创建了
+      const { existsSync, readFileSync, rmSync } = await import('node:fs')
+      const target = `${process.env.USERPROFILE}\\a5-approval-test.txt`
+      const wrote = existsSync(target)
+      let content = ''
+      if (wrote) {
+        try { content = readFileSync(target, 'utf8').trim() } catch { content = '(读不到)' }
+        try { rmSync(target) } catch { /* 清理失败不影响判定 */ }
+      }
+      return wrote
+        ? `卡片 ${card.id.slice(0, 10)}… allow-once 后文件已创建（内容 ${content.slice(0, 24)}）· 已清理`
+        : `卡片 ${card.id.slice(0, 10)}… 已 allow-once，但目标文件不存在（工具可能失败了）`
+    })
+  }
+
+  if (!APPROVALS) {
+    skip('A5b', '审批拒绝：不批准则不执行', '默认跳过：加 --approvals 才会真的触发审批卡')
+  } else {
+    await check('A5b', '审批拒绝：不批准则不执行', async () => {
+      const { existsSync, rmSync } = await import('node:fs')
+      const target = `${process.env.USERPROFILE}\\a5-reject-test.txt`
+      if (existsSync(target)) rmSync(target)
+
+      const workspaces = await call('/api/workspaces', { auth: true })
+      const workspace = (workspaces.body.workspaces ?? [])[0]
+      assert(workspace !== undefined, '没有工作区')
+      const created = await call('/api/sessions', { method: 'POST', auth: true, body: { workspaceId: workspace.id } })
+      const id = created.body.sessionId
+      await call(`/api/sessions/${encodeURIComponent(id)}/permission`, { method: 'POST', auth: true, body: { preset: 'workspace-write' } })
+      await call(`/api/sessions/${encodeURIComponent(id)}/prompt`, {
+        method: 'POST',
+        auth: true,
+        body: { text: `请用 shell 工具把文本 rejected 写到工作区之外：${target}，写完回复“已写入”。` }
+      })
+
+      let card = null
+      const deadline = Date.now() + 120_000
+      while (card === null && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1_500))
+        const pending = await call('/api/pending', { auth: true })
+        card = (pending.body?.approvals ?? [])[0] ?? null
+      }
+      if (card === null) {
+        await call(`/api/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', auth: true, body: {} })
+        return { skip: '没等到审批卡（当前预设不是 ask，或模型没做越界动作）' }
+      }
+
+      const rejected = await call(`/api/approvals/${encodeURIComponent(card.id)}`, { method: 'POST', auth: true, body: { action: 'reject' } })
+      assert(rejected.status === 200, `代答拒绝失败：${rejected.status} ${JSON.stringify(rejected.body)}`)
+      await new Promise((resolve) => setTimeout(resolve, 6_000))
+      const createdFile = existsSync(target)
+      if (createdFile) rmSync(target)
+      await call(`/api/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', auth: true, body: {} })
+      return createdFile
+        ? `✖ 拒绝了但文件仍被创建：${target}`
+        : `卡片 ${card.id.slice(0, 10)}… 已 reject，目标文件未创建（拒绝生效）`
     })
   }
 
