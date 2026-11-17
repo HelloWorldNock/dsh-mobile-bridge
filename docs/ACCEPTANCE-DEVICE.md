@@ -24,7 +24,7 @@
 | **A19 前台服务与通知** | **通过** | `dumpsys notification`：`channel=dsh_connection`、`flags=FOREGROUND_SERVICE` 常驻通知；另有「任务完成 · 仅回复收到」通知（`06-notification.png`） |
 | **A15 归档 → 手机就地取消归档** | **通过** | 电脑端 `POST /api/sessions/:id/archive` → 手机会话页出现横幅「这个任务已归档…点右上角菜单『取消归档』可以放回去」（`10-archived-banner.png`）；点右上菜单 → 「取消归档」→ 确认弹窗（`11-menu.png`）→ 主机侧 `archivedSessionIds` **已移除该会话**（`12-unarchived.png`） |
 | **A9 历史图片回显与全屏** | **通过** | 用带图 prompt 建会话（240×160 PNG）→ 手机时间线显示缩略图（`13-image-session.png`）→ 点缩略图弹出全屏查看器，标注 `240×160`（`14-image-viewer.png`） |
-| **A11 局域网 → tailnet** | **失败（复测确认）** | 第二次复测：关 Wi-Fi 后连续采样 70 秒，主机侧 `lastSeen` 只增不减（29→94 秒），**没有走 tailnet 重连**；随后 170 秒仍无上报。待确认手机是否装了 Tailscale 并登录——若没有，属环境不具备而非缺陷 |
+| **A11 局域网 → tailnet** | **待复测（前置未满足）** | 前两次失败原因是**移动数据没开**（用户反馈飞行模式连同流量一起关了，Tailscale 起不来）。现已确认：Tailscale 应用**已安装**（`com.tailscale.ipn`）但**VPN 未连接**（`ip addr` 里没有 `tun/tailscale` 接口），且 `mobile_data` 开关 adb 改不动（MUI 限制）。脚本 `tools/a11-failover.mjs` 已就绪（关网前先挂定时恢复 + 采样 lastSeen），等手机打开 Tailscale 后一条命令复测 |
 | A5 审批点按 | 未验 | 本机宿主审批策略是 `never`，不会弹卡（代答通道已由 `--approvals` 验证） |
 
 ## 测试方法上的坑（记下来免得重复踩）
