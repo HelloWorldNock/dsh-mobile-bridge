@@ -55,8 +55,22 @@ if ([string]::IsNullOrWhiteSpace($Password)) {
   -dname $DistinguishedName
 if ($LASTEXITCODE -ne 0) { throw "keytool 失败（退出码 $LASTEXITCODE）" }
 
+# properties 必须是纯 ASCII：Java 的 Properties.load(InputStream) 按 ISO-8859-1 解码，
+# 仓库路径含中文时会被读成 '????'，Gradle 随后报 "Keystore file ... not found"。
+# 解法：路径里有非 ASCII 就用 ASCII junction（C:\dshroot → 仓库根）作为访问路径。
+$propsStorePath = $keystore -replace '\\', '/'
+if ($propsStorePath -match '[^\x00-\x7F]') {
+  $junction = 'C:\dshroot'
+  if (-not (Test-Path $junction)) {
+    cmd /c mklink /J "$junction" "$repo" | Out-Null
+    Write-Output "已创建 ASCII junction：$junction → $repo"
+  }
+  $propsStorePath = "$($junction -replace '\\','/')/.toolchain/keystore/release.jks"
+  Write-Output '注意：仓库路径含中文，properties 里改写为 ASCII junction 路径（Gradle 才能读到）'
+}
+
 $props = @(
-  "storeFile=$($keystore -replace '\\','/')"
+  "storeFile=$propsStorePath"
   "storePassword=$Password"
   "keyAlias=$Alias"
   "keyPassword=$Password"

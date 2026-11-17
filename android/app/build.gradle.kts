@@ -15,8 +15,8 @@ android {
         applicationId = "com.ts7.dshremote"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40
-        versionName = "0.9.19"
+        versionCode = 41
+        versionName = "0.9.20"
     }
 
     /**

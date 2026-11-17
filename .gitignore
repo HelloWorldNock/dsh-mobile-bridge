@@ -1,4 +1,4 @@
-﻿# 本地工具链（JDK / Android SDK / Gradle，约 2.7 GB）
+# 本地工具链（JDK / Android SDK / Gradle，约 2.7 GB）
 .toolchain/
 
 # 构建与打包产物：APK 与插件 tgz 走 GitHub Release，不进仓库
@@ -18,6 +18,13 @@ android/local.properties
 android/keystore.properties
 *.jks
 *.keystore
+*.p12
+
+# 口令/密钥的手抄笔记（例如 keytool 生成后随手记的 .txt）——
+# release.mjs 会 `git add -A`，所以这里必须挡住，否则一次发版就把私钥笔记推进历史
+安装包私钥.txt
+*私钥*.txt
+*密钥*.txt
 
 # 测试残留与依赖（只有仓库根部的临时 test/ 目录被忽略；
 # host/test 与 android/app/src/test 是正式测试，必须入库）

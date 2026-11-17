@@ -188,6 +188,27 @@ function buildApk() {
     else copyFileSync(from, join(REPO, 'dist', target))
     log(`APK → dist/${target}`)
   }
+
+  // 有发布私钥（android/keystore.properties）时，额外产出**已签名**的 release 包。
+  // 这是 R26 的收尾：debug 包只给自用/联调，对外发的是签名 release 包。
+  if (!existsSync(join(REPO, 'android/keystore.properties'))) {
+    log('跳过 release 包：没有 android/keystore.properties（未配置发布私钥）')
+    return
+  }
+  run(gradle, [':app:assembleRelease', '--console=plain', '--no-daemon'], { cwd: projectDir, env })
+  const releaseDir = join(REPO, 'android/app/build/outputs/apk/release')
+  const releaseTargets = [
+    ['app-arm64-v8a-release.apk', `TS7-DSH-Remote-${args.version}-arm64-v8a-release.apk`],
+    ['app-x86_64-release.apk', `TS7-DSH-Remote-${args.version}-x86_64-release.apk`],
+    ['app-universal-release.apk', `TS7-DSH-Remote-${args.version}-release.apk`]
+  ]
+  for (const [source, target] of releaseTargets) {
+    const from = join(releaseDir, source)
+    if (!existsSync(from)) fail(`release 产物缺失：${from}（签名配置没生效？）`)
+    if (args.dryRun) log(`(dry) 复制 ${source} → dist/${target}`)
+    else copyFileSync(from, join(REPO, 'dist', target))
+    log(`已签名 APK → dist/${target}`)
+  }
 }
 
 // ---------------------------------------------------------------- sums
@@ -200,6 +221,14 @@ function sums() {
     `dsh-mobile-bridge-${args.version}.tgz`,
     'tsnode-windows-amd64.exe'
   ]
+  // 已配置发布私钥时，release 包也在 dist 里，一并计入 SHA256SUMS
+  if (existsSync(join(REPO, 'android/keystore.properties'))) {
+    files.push(
+      `TS7-DSH-Remote-${args.version}-arm64-v8a-release.apk`,
+      `TS7-DSH-Remote-${args.version}-x86_64-release.apk`,
+      `TS7-DSH-Remote-${args.version}-release.apk`
+    )
+  }
   const lines = []
   for (const name of files) {
     const path = join(REPO, 'dist', name)

@@ -50,3 +50,18 @@ test('build-client generated bundle matches its sources', async () => {
   const result = await build({ check: true })
   assert.equal(result.changed, false)
 })
+
+test('no key material or password note is tracked by git', async () => {
+  // 起因：`release.mjs` 发版时会 `git add -A`。有一次仓库根出现了 keytool 生成后
+  // 手抄的口令笔记（`安装包私钥.txt`）和密钥副本，若不拦住，一次发版就把私钥推进历史。
+  // .gitignore 是第一道闸，这条断言是第二道（防止有人 `git add -f`）。
+  const { execFileSync } = await import('node:child_process')
+  const tracked = execFileSync('git', ['ls-files'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter(Boolean)
+  const offenders = tracked.filter((file) =>
+    /\.(jks|keystore|p12|pfx)$/i.test(file) ||
+    /keystore\.properties$/i.test(file) ||
+    /私钥|密钥|password|secret/i.test(file) ||
+    /(^|\/)id_rsa/.test(file)
+  )
+  assert.deepEqual(offenders, [], `这些密钥类文件被 git 跟踪了，必须从索引里移除：\n${offenders.join('\n')}`)
+})

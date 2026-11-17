@@ -16,7 +16,7 @@ import { checkHostCompatibility, logCompatibility } from './compatibility-check.
 export const name = 'mobile-bridge'
 export const inject = ['sessionController', 'workspaceRegistry']
 
-const VERSION = '0.9.19'
+const VERSION = '0.9.20'
 // 超时默认值不在这里重复定义——见 state.js 的 TIMEOUT_DEFAULTS（120/120/180 s），
 // 配置里传了非法值时回落到同一组数，避免「面板显示 120 s、实际按 30 s 跑」这类偏差。
 const DEFAULTS = {
